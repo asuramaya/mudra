@@ -25,3 +25,11 @@
   now the only place the operator looks — click, PIN dialog, touch.
 - Subprocesses get stdin=/dev/null when no input is piped — no more accidental
   terminal interaction from the serve window.
+
+## 0.1.2 — the key picker (2026-07-19)
+
+- Seal cards grow a 🔑 1-4 selector (remembered): handle N pairs with physical
+  key N, and signing with a handle whose key is not the one plugged in fails as
+  "invalid format" AFTER the touch — the desk now says so in the log hint and
+  lets the operator pick the inserted key. CLI: seal --key N.
+- Header subtitle removed.

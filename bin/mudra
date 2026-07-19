@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.1.1"
+MUDRA_VERSION = "0.1.2"
 
 import http.server
 import json
@@ -272,21 +272,26 @@ class Ceremony:
     def say(self, msg):
         self.log.append({"t": time.strftime("%H:%M:%S"), "msg": msg})
 
-    def seal(self, name, arm=False):
+    def seal(self, name, arm=False, key_n=None):
         with self.lock:
             if self.active:
                 raise RuntimeError(f"ceremony already running for {self.active}")
             self.active, self.done, self.log = name, None, []
         try:
-            self._seal(name, arm)
+            self._seal(name, arm, key_n)
             self.done = "sealed"
         except Exception as exc:
             self.say(f"FAILED: {exc}")
+            if "invalid format" in str(exc):
+                self.say("HINT: 'invalid format' after the touch usually means the "
+                         "PLUGGED-IN key does not hold this handle's credential — "
+                         "handle N pairs with physical key N. Pick the number of "
+                         "the key that is actually inserted and retry.")
             self.done = "failed"
         finally:
             self.active = None
 
-    def _seal(self, name, arm):
+    def _seal(self, name, arm, key_n=None):
         st = repo_state(name)
         path, ver = st["path"], st.get("version")
         if not ver:
@@ -343,9 +348,12 @@ class Ceremony:
             else:
                 self.say("zenity missing — PIN falls back to the serve terminal; "
                          "signing — 👆 TOUCH YOUR KEY NOW")
+            sign_key = (os.path.join(KEY_HOME, f"id_asuramaya_master_{key_n}")
+                        if key_n else SIGN_KEY)
+            self.say(f"signing with handle {os.path.basename(sign_key)}")
             rc, _, err = run(["ssh-keygen", "-Y", "sign",
                               "-n", f"{name.lower()}-release",
-                              "-f", SIGN_KEY, mpath], timeout=120, env=env)
+                              "-f", sign_key, mpath], timeout=120, env=env)
             if rc:
                 raise RuntimeError(f"sign failed: {err}")
             self.say("signed. uploading the seal")
@@ -411,7 +419,7 @@ button:disabled { background:#555; color:#999; cursor:default; }
 label { color:var(--dim); font-size:.85em; }
 footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
 </style></head><body>
-<h1>mudra<small>the seal desk — sutra the thread, mudra the seal</small></h1>
+<h1>mudra</h1>
 <div id="touch">👆 TOUCH YOUR KEY NOW</div>
 <div id="repos">scanning the family…</div>
 <pre id="log"></pre>
@@ -435,6 +443,13 @@ async function refresh(){
     chips+=chip(s.state, seal?'warn':(s.state==='sealed'?'ok':'dimc'));
     div.innerHTML=`<b>${s.name}</b>${chips}`;
     if(seal){
+      const sel=document.createElement('select');
+      sel.title='which physical key is plugged in (handle N needs key N)';
+      for(let i=1;i<=4;i++){const o=document.createElement('option');
+        o.value=i;o.textContent='🔑 '+i;sel.appendChild(o);}
+      sel.value=localStorage.getItem('mudraKey')||'1';
+      sel.onchange=()=>localStorage.setItem('mudraKey',sel.value);
+      div.appendChild(sel);
       const btn=document.createElement('button');
       const needArm=s.anchor!=='armed';
       btn.textContent=needArm?'ARM + SEAL':'SEAL';
@@ -442,7 +457,7 @@ async function refresh(){
         if(needArm && !confirm(s.name+': arming pins the master identity FAIL-CLOSED forever. Proceed?'))return;
         btn.disabled=true;
         await fetch('/api/seal',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({repo:s.name,arm:needArm})});
+          body:JSON.stringify({repo:s.name,arm:needArm,key:parseInt(sel.value)})});
         pollLog();
       };
       div.appendChild(btn);
@@ -497,8 +512,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name = req.get("repo")
             if name not in REPOS:
                 return self._send('{"error":"unknown repo"}', code=400)
+            key_n = req.get("key")
+            if key_n is not None and key_n not in (1, 2, 3, 4):
+                return self._send('{"error":"key must be 1-4"}', code=400)
             threading.Thread(target=CEREMONY.seal,
-                             args=(name, bool(req.get("arm"))), daemon=True).start()
+                             args=(name, bool(req.get("arm")), key_n),
+                             daemon=True).start()
             self._send('{"ok":true}')
         except RuntimeError as exc:
             self._send(json.dumps({"error": str(exc)}), code=409)
@@ -550,7 +569,8 @@ def main():
         body = sync_signers(rest[0], dry="--dry" in rest)
         print(body if "--dry" in rest else f"{rest[0]}: anchor rebuilt ({EXPECTED_KEYS} keys)")
     elif cmd == "seal":
-        CEREMONY.seal(rest[0], arm="--arm" in rest)
+        key_n = int(rest[rest.index("--key") + 1]) if "--key" in rest else None
+        CEREMONY.seal(rest[0], arm="--arm" in rest, key_n=key_n)
         for e in CEREMONY.log:
             print(f"{e['t']}  {e['msg']}")
         sys.exit(0 if CEREMONY.done == "sealed" else 1)
