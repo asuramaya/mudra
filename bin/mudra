@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.0"
+MUDRA_VERSION = "0.3.1"
 
 import http.server
 import json
@@ -171,11 +171,16 @@ def release_state(path, tag, no_remote=False):
     except ValueError:
         return None
     assets = [a["name"] for a in doc.get("assets", [])]
+    # Manifest dialects: <artifact>.sha256 (single-artifact, coldspot/kast)
+    # or SHA256SUMS (Debian convention — preferred for multi-artifact, phanspeed).
+    manifest = next((a for a in assets
+                     if a == "SHA256SUMS" or
+                     (a.endswith(".sha256") and not a.endswith(".sha256.sig"))), None)
     return {
         "published": not doc.get("isDraft", False),
         "assets": assets,
-        "manifest": next((a for a in assets if a.endswith(".sha256")), None),
-        "sig": next((a for a in assets if a.endswith(".sha256.sig")), None),
+        "manifest": manifest,
+        "sig": (manifest + ".sig") if manifest and (manifest + ".sig") in assets else None,
         "slug": slug,
     }
 
@@ -401,7 +406,7 @@ class Ceremony:
         try:
             self.say(f"downloading PUBLISHED manifest {manifest} from {slug} {tag}")
             rc, _, err = run(["gh", "release", "download", tag, "-R", slug,
-                              "-p", "*.sha256", "-D", tmp], timeout=60)
+                              "-p", manifest, "-D", tmp], timeout=60)
             if rc:
                 raise RuntimeError(f"download failed: {err}")
             mpath = os.path.join(tmp, manifest)

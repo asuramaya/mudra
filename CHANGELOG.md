@@ -57,3 +57,11 @@
 - Roster grows sutra and rotten-apple (operator order): entries with a "/" are
   paths (rotten-apple lives outside REPO_ROOT), display name = basename.
 - VERSION fallback to Cargo.toml for Rust-workspace repos.
+
+## 0.3.1 — manifest dialects (2026-07-19)
+
+- Manifest detection accepts SHA256SUMS (Debian convention, preferred for
+  multi-artifact releases — phanspeed ships deb+tarball under one manifest)
+  alongside <artifact>.sha256; sig = <manifest>.sig either way. The desk had
+  mislabeled phanspeed v0.30.1 "NO MANIFEST (broken)" for speaking the better
+  dialect.
