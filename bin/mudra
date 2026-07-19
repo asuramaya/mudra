@@ -13,12 +13,13 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.1.2"
+MUDRA_VERSION = "0.2.0"
 
 import http.server
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,56 @@ REPOS = [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).split
 PORT = int(os.environ.get("MUDRA_PORT", "7770"))
 SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya_master_1"))
 EXPECTED_KEYS = 4
+KEYMAP_PATH = os.path.join(HOME, ".config", "mudra", "keymap.json")
+
+
+# ------------------------------------------------- physical key detection
+# The ladder: serial where the hardware offers one, model-fingerprint where
+# it doesn't (works while only ONE serial-less key exists), learned on first
+# successful seal, manual pick as the floor. A wrong pick can only ever fail
+# cleanly — the authenticator enforces handle↔credential cryptographically.
+
+_FP_CACHE = {"t": 0.0, "fp": None}
+
+
+def device_fingerprint():
+    """Fingerprint the ONE connected FIDO key, or None if 0/many/unknown."""
+    now = time.time()
+    if now - _FP_CACHE["t"] < 10:
+        return _FP_CACHE["fp"]
+    fp = None
+    rc, out, _ = run(["ykman", "list", "--serials"], timeout=10)
+    serials = [l.strip() for l in out.splitlines() if l.strip()] if rc == 0 else []
+    if len(serials) == 1:
+        fp = "serial:" + serials[0]
+    else:
+        rc, out, _ = run(["ykman", "list"], timeout=10)
+        models = [l.strip() for l in out.splitlines() if l.strip()] if rc == 0 else []
+        if len(models) == 1:
+            fp = "model:" + re.sub(r"\s*\[.*$", "", models[0])
+    _FP_CACHE.update(t=now, fp=fp)
+    return fp
+
+
+def load_keymap():
+    try:
+        with open(KEYMAP_PATH) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def learn_key(fp, n):
+    m = load_keymap()
+    m[fp] = n
+    os.makedirs(os.path.dirname(KEYMAP_PATH), exist_ok=True)
+    with open(KEYMAP_PATH, "w") as f:
+        json.dump(m, f, indent=1)
+
+
+def detected_key():
+    fp = device_fingerprint()
+    return load_keymap().get(fp) if fp else None
 
 
 def run(cmd, cwd=None, timeout=120, input_=None, env=None):
@@ -383,6 +434,12 @@ class Ceremony:
                 raise RuntimeError(f"signature verify-back failed: {err}")
             self.say(f"SEALED ✓ {name} {tag} — hash chain and signature verify "
                      "against the armed anchor, end-user path")
+            if key_n:
+                fp = device_fingerprint()
+                if fp and load_keymap().get(fp) != key_n:
+                    learn_key(fp, key_n)
+                    self.say(f"learned: connected device ({fp}) = 🔑 {key_n} — "
+                             "auto-selected from now on")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -447,9 +504,11 @@ async function refresh(){
       sel.title='which physical key is plugged in (handle N needs key N)';
       for(let i=1;i<=4;i++){const o=document.createElement('option');
         o.value=i;o.textContent='🔑 '+i;sel.appendChild(o);}
-      sel.value=localStorage.getItem('mudraKey')||'1';
+      sel.value=d.detected||localStorage.getItem('mudraKey')||'1';
       sel.onchange=()=>localStorage.setItem('mudraKey',sel.value);
       div.appendChild(sel);
+      if(d.detected)div.insertAdjacentHTML('beforeend',
+        chip('🔑 '+d.detected+' detected','ok'));
       const btn=document.createElement('button');
       const needArm=s.anchor!=='armed';
       btn.textContent=needArm?'ARM + SEAL':'SEAL';
@@ -479,24 +538,47 @@ refresh(); setInterval(refresh, 30000);
 </script></body></html>"""
 
 
+TOKEN = None   # set by serve(); the desk is single-operator by construction
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def _send(self, body, ctype="application/json", code=200):
+    def _send(self, body, ctype="application/json", code=200, cookie=None):
         data = body.encode() if isinstance(body, str) else body
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        if cookie:
+            self.send_header("Set-Cookie",
+                             f"mudra={cookie}; HttpOnly; SameSite=Strict; Path=/")
         self.end_headers()
         self.wfile.write(data)
 
     def log_message(self, *a):
         pass
 
+    def _authed(self):
+        """The serve URL carries a one-boot token; the first visit sets it as
+        a cookie. Loopback is same-host-ANY-user reachable — the token keeps
+        the desk single-operator."""
+        if TOKEN is None:
+            return True
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if q.get("token", [None])[0] == TOKEN:
+            return True
+        cookies = self.headers.get("Cookie", "")
+        return any(c.strip() == f"mudra={TOKEN}" for c in cookies.split(";"))
+
     def do_GET(self):
+        if not self._authed():
+            return self._send('{"error":"unauthorized — open the URL the serve '
+                              'command printed"}', code=401)
         p = urllib.parse.urlparse(self.path).path
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         if p == "/":
-            self._send(PAGE.replace("%VER%", MUDRA_VERSION), "text/html")
+            self._send(PAGE.replace("%VER%", MUDRA_VERSION), "text/html",
+                       cookie=q.get("token", [None])[0])
         elif p == "/api/status":
-            self._send(json.dumps({"repos": scan()}))
+            self._send(json.dumps({"repos": scan(), "detected": detected_key()}))
         elif p == "/api/log":
             self._send(json.dumps({"log": CEREMONY.log, "done": CEREMONY.done,
                                    "active": CEREMONY.active}))
@@ -504,6 +586,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send('{"error":"not found"}', code=404)
 
     def do_POST(self):
+        if not self._authed():
+            return self._send('{"error":"unauthorized"}', code=401)
         if urllib.parse.urlparse(self.path).path != "/api/seal":
             return self._send('{"error":"not found"}', code=404)
         try:
@@ -575,9 +659,12 @@ def main():
             print(f"{e['t']}  {e['msg']}")
         sys.exit(0 if CEREMONY.done == "sealed" else 1)
     elif cmd == "serve":
+        global TOKEN
         port = int(rest[rest.index("--port") + 1]) if "--port" in rest else PORT
+        TOKEN = secrets.token_urlsafe(24)
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
-        print(f"mudra desk: http://127.0.0.1:{port}  (Ctrl-C to close)")
+        print(f"mudra desk: http://127.0.0.1:{port}/?token={TOKEN}")
+        print("(open THAT url — the token keeps the desk yours; Ctrl-C to close)")
         try:
             srv.serve_forever()
         except KeyboardInterrupt:

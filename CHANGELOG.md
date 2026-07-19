@@ -33,3 +33,13 @@
   "invalid format" AFTER the touch — the desk now says so in the log hint and
   lets the operator pick the inserted key. CLI: seal --key N.
 - Header subtitle removed.
+
+## 0.2.0 — the desk knows your keys (2026-07-19)
+
+- Physical-key auto-detection ladder: serial fingerprint (the 5Cs) or model
+  fingerprint (the one serial-less Security Key), LEARNED on first successful
+  seal with a picked key — ~/.config/mudra/keymap.json, no setup. GUI shows
+  "🔑 N detected" and preselects it. Floor stays manual pick + safe retry:
+  the authenticator enforces handle↔credential, a wrong pick only fails clean.
+- Desk token: serve prints a one-boot tokened URL; loopback is any-local-user
+  reachable, the token keeps the desk single-operator (cookie after first visit).
