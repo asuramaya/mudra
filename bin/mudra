@@ -1,0 +1,554 @@
+#!/usr/bin/env python3
+# mudra — the seal desk of the pill family.
+#
+# Operator-side release manager: the seats build, commit, tag (on alfred's GO)
+# and CI publishes UNSIGNED artifacts + a sha256 manifest. mudra derives the
+# queue from reality — a published release missing its .sig IS a queue entry,
+# an empty allowed_signers IS the unarmed state — and hands the operator one
+# desk (CLI or local GUI) to arm anchors and seal manifests with the hardware
+# key. mudra never holds key material: signing shells to ssh-keygen and the
+# private halves never leave the FIDO2 keys. GPLv3, stdlib-only.
+#
+# Doctrine: ~/code/REPOS/RELEASE.md is the truth; mudra automates its runbook.
+# The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
+# is the touch — that is the operator's hand, by design.
+
+MUDRA_VERSION = "0.1.0"
+
+import http.server
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.parse
+
+HOME = os.path.expanduser("~")
+REPO_ROOT = os.environ.get("MUDRA_REPO_ROOT", os.path.join(HOME, "code", "REPOS"))
+KEY_HOME = os.environ.get("MUDRA_KEY_HOME", os.path.join(HOME, ".ssh", "asuramaya-master"))
+DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestalt"]
+REPOS = [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).split(",") if r]
+PORT = int(os.environ.get("MUDRA_PORT", "7770"))
+SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya_master_1"))
+EXPECTED_KEYS = 4
+
+
+def run(cmd, cwd=None, timeout=120, input_=None):
+    """Run a command; return (rc, stdout, stderr). Never raises on rc != 0."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, timeout=timeout, input=input_,
+                           capture_output=True, text=True)
+        return p.returncode, p.stdout, p.stderr
+    except FileNotFoundError:
+        return 127, "", f"{cmd[0]}: not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", f"{' '.join(cmd)}: timeout"
+
+
+# ---------------------------------------------------------------- discovery
+
+def canon_pubs():
+    """The canonical public halves from the operator's key home."""
+    if not os.path.isdir(KEY_HOME):
+        return None
+    pubs = []
+    for name in sorted(os.listdir(KEY_HOME)):
+        if name.endswith(".pub"):
+            with open(os.path.join(KEY_HOME, name)) as f:
+                line = f.read().strip()
+            if line:
+                pubs.append(line)
+    return pubs
+
+
+def anchor_lines(path):
+    """Non-comment, non-blank lines of an allowed_signers file."""
+    try:
+        with open(path) as f:
+            return [l.strip() for l in f
+                    if l.strip() and not l.strip().startswith("#")]
+    except OSError:
+        return None
+
+
+def embedded_block(install_sh):
+    """The RELEASE_ALLOWED_SIGNERS='...' content embedded in install.sh.
+    Single-quoted by family convention (coldspot's sync-signers): single
+    quotes span lines and hold the namespaces=\"...\" double quotes unescaped."""
+    try:
+        with open(install_sh) as f:
+            m = re.search(r"RELEASE_ALLOWED_SIGNERS='([^']*)'", f.read())
+        return m.group(1).strip() if m else None
+    except OSError:
+        return None
+
+
+def gh_owner_repo(path):
+    rc, out, _ = run(["git", "remote", "get-url", "origin"], cwd=path)
+    if rc != 0:
+        return None
+    m = re.search(r"github\.com[:/]([^/]+/[^/.]+)", out.strip())
+    return m.group(1) if m else None
+
+
+def release_state(path, tag, no_remote=False):
+    """What GitHub says about <tag>: published? manifest? sig? None if unknown."""
+    if no_remote:
+        return None
+    slug = gh_owner_repo(path)
+    if not slug:
+        return None
+    rc, out, _ = run(["gh", "release", "view", tag, "-R", slug,
+                      "--json", "assets,isDraft"], timeout=30)
+    if rc != 0:
+        return {"published": False}
+    try:
+        doc = json.loads(out)
+    except ValueError:
+        return None
+    assets = [a["name"] for a in doc.get("assets", [])]
+    return {
+        "published": not doc.get("isDraft", False),
+        "assets": assets,
+        "manifest": next((a for a in assets if a.endswith(".sha256")), None),
+        "sig": next((a for a in assets if a.endswith(".sha256.sig")), None),
+        "slug": slug,
+    }
+
+
+def repo_state(name, no_remote=False):
+    """Everything the desk knows about one repo, derived, no stored state."""
+    path = os.path.join(REPO_ROOT, name)
+    st = {"name": name, "path": path}
+    if not os.path.isdir(os.path.join(path, ".git")):
+        st["missing"] = True
+        return st
+
+    try:
+        with open(os.path.join(path, "VERSION")) as f:
+            st["version"] = f.read().strip()
+    except OSError:
+        st["version"] = None
+
+    rc, out, _ = run(["git", "tag", "-l"], cwd=path)
+    tags = out.split() if rc == 0 else []
+    st["tagged"] = bool(st["version"]) and (f"v{st['version']}" in tags)
+    rc, out, _ = run(["git", "status", "--porcelain", "-uno"], cwd=path)
+    st["dirty"] = bool(out.strip()) if rc == 0 else None
+
+    anchor_path = os.path.join(path, "release-signing", "allowed_signers")
+    lines = anchor_lines(anchor_path)
+    if lines is None:
+        st["anchor"] = "none"
+    elif not lines:
+        st["anchor"] = "inert"
+    else:
+        st["anchor"] = "armed"
+        st["anchor_keys"] = len(lines)
+    emb = embedded_block(os.path.join(path, "install.sh"))
+    if emb is not None:
+        file_body = "\n".join(lines or [])
+        st["embedded_ok"] = (emb == file_body)
+
+    if st["version"] and st["tagged"]:
+        st["release"] = release_state(path, f"v{st['version']}", no_remote)
+
+    # The derived verdict, in queue order of urgency.
+    rel = st.get("release")
+    if st.get("missing"):
+        st["state"] = "missing"
+    elif not st["version"]:
+        st["state"] = "no VERSION"
+    elif not st["tagged"]:
+        st["state"] = "untagged (seat's move, on GO)"
+    elif rel is None:
+        st["state"] = "tagged (remote unknown)"
+    elif not rel.get("published"):
+        st["state"] = "tagged, release not published (CI?)"
+    elif not rel.get("manifest"):
+        st["state"] = "published, NO MANIFEST (broken release)"
+    elif not rel.get("sig"):
+        st["state"] = "AWAITING SEAL"
+    else:
+        st["state"] = "sealed"
+    return st
+
+
+def scan(no_remote=False):
+    return [repo_state(r, no_remote) for r in REPOS]
+
+
+# ------------------------------------------------------------------- audit
+
+def audit(no_remote=True):
+    """Family invariants: same canonical keys in every armed anchor,
+    embedded copies byte-identical, versions vs tags coherent."""
+    pubs = canon_pubs()
+    findings = []
+    if pubs is None:
+        findings.append(("key-home", "MISSING: " + KEY_HOME))
+    elif len(pubs) != EXPECTED_KEYS:
+        findings.append(("key-home", f"{len(pubs)} pubs, expected {EXPECTED_KEYS}"))
+    canon_blobs = sorted(p.split()[1] for p in pubs) if pubs else []
+
+    states = scan(no_remote)
+    for st in states:
+        n = st["name"]
+        if st.get("missing"):
+            findings.append((n, "repo missing from " + REPO_ROOT))
+            continue
+        if st["anchor"] == "armed":
+            lines = anchor_lines(os.path.join(st["path"], "release-signing",
+                                              "allowed_signers"))
+            # anchor line: principal namespaces="..." keytype BLOB comment
+            blobs = sorted(l.split()[3] for l in lines if len(l.split()) >= 4)
+            if canon_blobs and blobs != canon_blobs:
+                findings.append((n, "armed anchor DIVERGES from canonical keys"))
+            bad = [l for l in lines if f'namespaces="{n.lower()}-release' not in l
+                   or not l.startswith(n.lower() + " ")]
+            if bad:
+                findings.append((n, f"{len(bad)} anchor line(s) with wrong principal/namespace"))
+        if st.get("embedded_ok") is False:
+            findings.append((n, "embedded install.sh copy != anchor file"))
+        # dirty trees are status information, not audit findings — audit fails
+        # only on broken INVARIANTS, or it would cry through every dev cycle
+    return states, findings
+
+
+# ------------------------------------------------------------ sync-signers
+
+def sync_signers(name, dry=False):
+    """Rebuild <repo>'s anchor (and any embedded twin) from the canonical key
+    home. Rebuild-from-all, never append; refuses on != EXPECTED_KEYS."""
+    pubs = canon_pubs()
+    if pubs is None:
+        raise SystemExit(f"key home missing: {KEY_HOME}")
+    if len(pubs) != EXPECTED_KEYS:
+        raise SystemExit(f"refusing: {len(pubs)} canonical pubs, expected {EXPECTED_KEYS}")
+    path = os.path.join(REPO_ROOT, name)
+    principal = name.lower()
+    lines = []
+    for p in pubs:
+        parts = p.split()
+        keytype, blob = parts[0], parts[1]
+        comment = parts[2] if len(parts) > 2 else "master"
+        lines.append(f'{principal} namespaces="{principal}-release,pills-tag" '
+                     f"{keytype} {blob} {comment}")
+    body = "\n".join(lines)
+    anchor_path = os.path.join(path, "release-signing", "allowed_signers")
+    if dry:
+        return body
+    os.makedirs(os.path.dirname(anchor_path), exist_ok=True)
+    with open(anchor_path, "w") as f:
+        f.write(body + "\n")
+    install_sh = os.path.join(path, "install.sh")
+    if embedded_block(install_sh) is not None:
+        with open(install_sh) as f:
+            content = f.read()
+        content = re.sub(r"RELEASE_ALLOWED_SIGNERS='[^']*'",
+                         lambda _: "RELEASE_ALLOWED_SIGNERS='" + body + "'",
+                         content)
+        with open(install_sh, "w") as f:
+            f.write(content)
+    return body
+
+
+# ---------------------------------------------------------------- ceremony
+
+class Ceremony:
+    """One sealing at a time; steps stream into a log the GUI polls."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.log = []
+        self.active = None    # repo name while running
+        self.done = None      # "sealed" | "failed"
+
+    def say(self, msg):
+        self.log.append({"t": time.strftime("%H:%M:%S"), "msg": msg})
+
+    def seal(self, name, arm=False):
+        with self.lock:
+            if self.active:
+                raise RuntimeError(f"ceremony already running for {self.active}")
+            self.active, self.done, self.log = name, None, []
+        try:
+            self._seal(name, arm)
+            self.done = "sealed"
+        except Exception as exc:
+            self.say(f"FAILED: {exc}")
+            self.done = "failed"
+        finally:
+            self.active = None
+
+    def _seal(self, name, arm):
+        st = repo_state(name)
+        path, ver = st["path"], st.get("version")
+        if not ver:
+            raise RuntimeError("no VERSION")
+        tag = f"v{ver}"
+        rel = st.get("release") or {}
+        if not rel.get("published"):
+            raise RuntimeError(f"{tag} is not a published release")
+        if rel.get("sig"):
+            raise RuntimeError(f"{tag} already carries a seal")
+        manifest = rel.get("manifest")
+        if not manifest:
+            raise RuntimeError(f"{tag} has no sha256 manifest")
+        slug = rel["slug"]
+
+        if st["anchor"] != "armed":
+            if not arm:
+                raise RuntimeError("anchor is not armed — re-run with arm "
+                                   "(this pins the master identity FAIL-CLOSED forever)")
+            self.say(f"ARMING {name}: rebuilding anchor from {KEY_HOME}")
+            sync_signers(name)
+            self.say("anchor + embedded copy rebuilt (4 keys)")
+            rc, out, err = run(["git", "add", "-A"], cwd=path)
+            rc2, _, err2 = run(["git", "commit", "-m",
+                                "arm release verification: pin the master identity"],
+                               cwd=path)
+            if rc or rc2:
+                raise RuntimeError(f"arming commit failed: {err or err2}")
+            rc, _, err = run(["git", "push"], cwd=path, timeout=60)
+            if rc:
+                raise RuntimeError(f"push failed: {err}")
+            self.say("arming commit pushed — verification is now fail-closed")
+
+        tmp = tempfile.mkdtemp(prefix="mudra-")
+        try:
+            self.say(f"downloading PUBLISHED manifest {manifest} from {slug} {tag}")
+            rc, _, err = run(["gh", "release", "download", tag, "-R", slug,
+                              "-p", "*.sha256", "-D", tmp], timeout=60)
+            if rc:
+                raise RuntimeError(f"download failed: {err}")
+            mpath = os.path.join(tmp, manifest)
+            self.say("signing the manifest — 👆 TOUCH YOUR KEY NOW")
+            rc, _, err = run(["ssh-keygen", "-Y", "sign",
+                              "-n", f"{name.lower()}-release",
+                              "-f", SIGN_KEY, mpath], timeout=90)
+            if rc:
+                raise RuntimeError(f"sign failed: {err}")
+            self.say("signed. uploading the seal")
+            rc, _, err = run(["gh", "release", "upload", tag, mpath + ".sig",
+                              "-R", slug, "--clobber"], timeout=60)
+            if rc:
+                raise RuntimeError(f"upload failed: {err}")
+
+            self.say("verify-back as an end user: downloading all assets")
+            vdir = os.path.join(tmp, "verify")
+            os.makedirs(vdir)
+            rc, _, err = run(["gh", "release", "download", tag, "-R", slug,
+                              "-D", vdir], timeout=120)
+            if rc:
+                raise RuntimeError(f"verify download failed: {err}")
+            rc, out, err = run(["sha256sum", "-c", manifest], cwd=vdir)
+            if rc:
+                raise RuntimeError(f"manifest hash check failed: {out} {err}")
+            with open(os.path.join(vdir, manifest)) as f:
+                mbytes = f.read()
+            anchor = os.path.join(REPO_ROOT, name, "release-signing", "allowed_signers")
+            rc, out, err = run(["ssh-keygen", "-Y", "verify", "-f", anchor,
+                                "-I", name.lower(), "-n", f"{name.lower()}-release",
+                                "-s", os.path.join(vdir, manifest + ".sig")],
+                               input_=mbytes)
+            if rc:
+                raise RuntimeError(f"signature verify-back failed: {err}")
+            self.say(f"SEALED ✓ {name} {tag} — hash chain and signature verify "
+                     "against the armed anchor, end-user path")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+CEREMONY = Ceremony()
+
+
+# --------------------------------------------------------------------- GUI
+
+PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<title>mudra — the seal desk</title><style>
+:root { --accent:#b9acff; --dim:#9aa0a6; --good:#4caf50; --warn:#ffbb33; --bad:#ff5b5b;
+        --bg:#1b1d1a; --card:#262924; --fg:#e8eaed; }
+body { background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif;
+       margin:0; padding:2rem; max-width:900px; margin-inline:auto; }
+h1 { color:var(--accent); font-weight:600; letter-spacing:.04em; }
+h1 small { color:var(--dim); font-weight:400; font-size:.55em; margin-left:.8em; }
+.card { background:var(--card); border-radius:14px; padding:1rem 1.2rem; margin:.7rem 0;
+        display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+.card b { font-size:1.05em; min-width:7.5em; }
+.chip { border-radius:999px; padding:.1em .8em; font-size:.85em; white-space:nowrap; }
+.ok    { background:color-mix(in srgb,var(--good) 25%,transparent); color:var(--good); }
+.warn  { background:color-mix(in srgb,var(--warn) 25%,transparent); color:var(--warn); }
+.bad   { background:color-mix(in srgb,var(--bad) 25%,transparent);  color:var(--bad); }
+.dimc  { background:#3333; color:var(--dim); }
+.queue { border:1px solid var(--accent); }
+button { background:var(--accent); color:#1b1d1a; border:0; border-radius:10px;
+         padding:.45em 1.1em; font-weight:600; cursor:pointer; margin-left:auto; }
+button:disabled { background:#555; color:#999; cursor:default; }
+#log { background:#111; border-radius:10px; padding:.8rem 1rem; font:13px/1.6 monospace;
+       white-space:pre-wrap; display:none; }
+#touch { display:none; text-align:center; font-size:1.5em; color:var(--warn);
+         padding:.6em; border:2px dashed var(--warn); border-radius:14px; margin:.7rem 0; }
+label { color:var(--dim); font-size:.85em; }
+footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
+</style></head><body>
+<h1>mudra<small>the seal desk — sutra the thread, mudra the seal</small></h1>
+<div id="touch">👆 TOUCH YOUR KEY NOW</div>
+<div id="repos">scanning the family…</div>
+<pre id="log"></pre>
+<footer>queue is derived from reality: a published release without a .sig IS the queue.
+mudra holds no key material; the touch is yours alone. · v%VER%</footer>
+<script>
+const chip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
+async function refresh(){
+  const r=await fetch('/api/status'); const d=await r.json();
+  const el=document.getElementById('repos'); el.innerHTML='';
+  for(const s of d.repos){
+    const div=document.createElement('div');
+    const seal=s.state==='AWAITING SEAL';
+    div.className='card'+(seal?' queue':'');
+    let chips='';
+    chips+=chip('v'+(s.version||'?'), s.tagged?'dimc':'warn');
+    chips+=chip(s.anchor==='armed'?'armed ⚔':'anchor '+s.anchor,
+                s.anchor==='armed'?'ok':(s.anchor==='none'?'dimc':'warn'));
+    if(s.embedded_ok===false) chips+=chip('embedded drift','bad');
+    if(s.dirty) chips+=chip('dirty tree','warn');
+    chips+=chip(s.state, seal?'warn':(s.state==='sealed'?'ok':'dimc'));
+    div.innerHTML=`<b>${s.name}</b>${chips}`;
+    if(seal){
+      const btn=document.createElement('button');
+      const needArm=s.anchor!=='armed';
+      btn.textContent=needArm?'ARM + SEAL':'SEAL';
+      btn.onclick=async()=>{
+        if(needArm && !confirm(s.name+': arming pins the master identity FAIL-CLOSED forever. Proceed?'))return;
+        btn.disabled=true;
+        await fetch('/api/seal',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({repo:s.name,arm:needArm})});
+        pollLog();
+      };
+      div.appendChild(btn);
+    }
+    el.appendChild(div);
+  }
+}
+async function pollLog(){
+  const log=document.getElementById('log'); log.style.display='block';
+  const t=setInterval(async()=>{
+    const r=await fetch('/api/log'); const d=await r.json();
+    log.textContent=d.log.map(e=>e.t+'  '+e.msg).join('\\n');
+    document.getElementById('touch').style.display=
+      d.log.length && d.log[d.log.length-1].msg.includes('TOUCH')?'block':'none';
+    if(d.done){clearInterval(t);document.getElementById('touch').style.display='none';refresh();}
+  },800);
+}
+refresh(); setInterval(refresh, 30000);
+</script></body></html>"""
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def _send(self, body, ctype="application/json", code=200):
+        data = body.encode() if isinstance(body, str) else body
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        p = urllib.parse.urlparse(self.path).path
+        if p == "/":
+            self._send(PAGE.replace("%VER%", MUDRA_VERSION), "text/html")
+        elif p == "/api/status":
+            self._send(json.dumps({"repos": scan()}))
+        elif p == "/api/log":
+            self._send(json.dumps({"log": CEREMONY.log, "done": CEREMONY.done,
+                                   "active": CEREMONY.active}))
+        else:
+            self._send('{"error":"not found"}', code=404)
+
+    def do_POST(self):
+        if urllib.parse.urlparse(self.path).path != "/api/seal":
+            return self._send('{"error":"not found"}', code=404)
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+            req = json.loads(self.rfile.read(min(n, 4096)) or "{}")
+            name = req.get("repo")
+            if name not in REPOS:
+                return self._send('{"error":"unknown repo"}', code=400)
+            threading.Thread(target=CEREMONY.seal,
+                             args=(name, bool(req.get("arm"))), daemon=True).start()
+            self._send('{"ok":true}')
+        except RuntimeError as exc:
+            self._send(json.dumps({"error": str(exc)}), code=409)
+        except Exception as exc:
+            self._send(json.dumps({"error": type(exc).__name__}), code=500)
+
+
+# --------------------------------------------------------------------- CLI
+
+def cli_status(args):
+    no_remote = "--no-remote" in args
+    states = scan(no_remote)
+    if "--json" in args:
+        print(json.dumps({"repos": states}, indent=2))
+        return
+    for s in states:
+        ver = s.get("version") or "?"
+        print(f"{s['name']:<10} v{ver:<8} anchor={s.get('anchor','?'):<5} "
+              f"{'dirty ' if s.get('dirty') else ''}{s.get('state','')}")
+
+
+def cli_audit(args):
+    states, findings = audit(no_remote="--remote" not in args)
+    for s in states:
+        ver = s.get("version") or "?"
+        print(f"{s['name']:<10} v{ver:<8} anchor={s.get('anchor','?')}")
+    if findings:
+        print("\nFINDINGS:")
+        for where, what in findings:
+            print(f"  {where}: {what}")
+        sys.exit(1)
+    print("\naudit clean: family invariants hold")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__ or "mudra status|audit|sync-signers <repo> [--dry]|"
+              "seal <repo> [--arm]|serve [--port N]")
+        print("mudra status [--json] [--no-remote] · audit [--remote] · "
+              "sync-signers <repo> [--dry] · seal <repo> [--arm] · serve [--port N]")
+        return
+    cmd, rest = args[0], args[1:]
+    if cmd == "status":
+        cli_status(rest)
+    elif cmd == "audit":
+        cli_audit(rest)
+    elif cmd == "sync-signers":
+        body = sync_signers(rest[0], dry="--dry" in rest)
+        print(body if "--dry" in rest else f"{rest[0]}: anchor rebuilt ({EXPECTED_KEYS} keys)")
+    elif cmd == "seal":
+        CEREMONY.seal(rest[0], arm="--arm" in rest)
+        for e in CEREMONY.log:
+            print(f"{e['t']}  {e['msg']}")
+        sys.exit(0 if CEREMONY.done == "sealed" else 1)
+    elif cmd == "serve":
+        port = int(rest[rest.index("--port") + 1]) if "--port" in rest else PORT
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        print(f"mudra desk: http://127.0.0.1:{port}  (Ctrl-C to close)")
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    else:
+        raise SystemExit(f"unknown command: {cmd}")
+
+
+if __name__ == "__main__":
+    main()
