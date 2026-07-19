@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.2"
+MUDRA_VERSION = "0.3.3"
 
 import http.server
 import json
@@ -499,6 +499,10 @@ h1 small { color:var(--dim); font-weight:400; font-size:.55em; margin-left:.8em;
 button { background:var(--accent); color:#1b1d1a; border:0; border-radius:10px;
          padding:.45em 1.1em; font-weight:600; cursor:pointer; margin-left:auto; }
 button:disabled { background:#555; color:#999; cursor:default; }
+select { background:#333; color:var(--fg); border:1px solid #555;
+         border-radius:999px; padding:.15em .5em; font-size:.9em; }
+select.det { background:color-mix(in srgb,var(--good) 25%,transparent);
+             color:var(--good); border-color:var(--good); }
 #log { background:#111; border-radius:10px; padding:.8rem 1rem; font:13px/1.6 monospace;
        white-space:pre-wrap; display:none; }
 #touch { display:none; text-align:center; font-size:1.5em; color:var(--warn);
@@ -535,10 +539,14 @@ async function refresh(){
       for(let i=1;i<=4;i++){const o=document.createElement('option');
         o.value=i;o.textContent='🔑 '+i;sel.appendChild(o);}
       sel.value=d.detected||localStorage.getItem('mudraKey')||'1';
-      sel.onchange=()=>localStorage.setItem('mudraKey',sel.value);
+      const paint=()=>{
+        sel.className=(d.detected&&+sel.value===d.detected)?'det':'';
+        sel.title=d.detected?('key '+d.detected+' detected on USB')
+                            :'no key detected — pick the inserted key';
+      };
+      paint();
+      sel.onchange=()=>{localStorage.setItem('mudraKey',sel.value);paint();};
       div.appendChild(sel);
-      if(d.detected)div.insertAdjacentHTML('beforeend',
-        chip('🔑 '+d.detected+' detected','ok'));
       const btn=document.createElement('button');
       const needArm=s.anchor!=='armed';
       btn.textContent=needArm?'ARM + SEAL':'SEAL';

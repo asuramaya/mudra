@@ -72,3 +72,8 @@
   anchor file, trailing newline included (tjmax's find: the omitted newline
   false-drifted every byte-for-byte CI compare — coldspot's signing-sync was
   red on both post-arming pushes because of it).
+
+## 0.3.3 — one key control (2026-07-19)
+
+- The 🔑 dropdown IS the indicator now: it turns green when the selection
+  matches the detected key; the separate "detected" chip is gone.
