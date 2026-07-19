@@ -51,3 +51,9 @@
   seat's untracked session files (.claude/, .mcp.json) into the public
   coldspot repo during ceremony #1; no credentials exposed (local paths and
   a localhost URL only), history rewritten out by the operator's hand.
+
+## 0.3.0 — the whole estate on one desk (2026-07-19)
+
+- Roster grows sutra and rotten-apple (operator order): entries with a "/" are
+  paths (rotten-apple lives outside REPO_ROOT), display name = basename.
+- VERSION fallback to Cargo.toml for Rust-workspace repos.

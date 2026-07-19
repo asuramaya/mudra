@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.2.1"
+MUDRA_VERSION = "0.3.0"
 
 import http.server
 import json
@@ -31,8 +31,15 @@ import urllib.parse
 HOME = os.path.expanduser("~")
 REPO_ROOT = os.environ.get("MUDRA_REPO_ROOT", os.path.join(HOME, "code", "REPOS"))
 KEY_HOME = os.environ.get("MUDRA_KEY_HOME", os.path.join(HOME, ".ssh", "asuramaya-master"))
-DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestalt"]
-REPOS = [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).split(",") if r]
+DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestalt",
+                 "sutra", "~/code/rotten-apple"]
+# Roster entries are names under REPO_ROOT, or paths (anything with a "/").
+# ROSTER maps display name -> absolute path; order is the desk's card order.
+ROSTER = {}
+for _e in [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).split(",") if r]:
+    _p = os.path.expanduser(_e) if "/" in _e else os.path.join(REPO_ROOT, _e)
+    ROSTER[os.path.basename(_p.rstrip("/"))] = _p
+REPOS = list(ROSTER)
 PORT = int(os.environ.get("MUDRA_PORT", "7770"))
 SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya_master_1"))
 EXPECTED_KEYS = 4
@@ -175,7 +182,7 @@ def release_state(path, tag, no_remote=False):
 
 def repo_state(name, no_remote=False):
     """Everything the desk knows about one repo, derived, no stored state."""
-    path = os.path.join(REPO_ROOT, name)
+    path = ROSTER.get(name, os.path.join(REPO_ROOT, name))
     st = {"name": name, "path": path}
     if not os.path.isdir(os.path.join(path, ".git")):
         st["missing"] = True
@@ -185,7 +192,14 @@ def repo_state(name, no_remote=False):
         with open(os.path.join(path, "VERSION")) as f:
             st["version"] = f.read().strip()
     except OSError:
+        # Cargo-workspace repos (rotten-apple) carry the version in Cargo.toml.
         st["version"] = None
+        try:
+            with open(os.path.join(path, "Cargo.toml")) as f:
+                m = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.M)
+            st["version"] = m.group(1) if m else None
+        except OSError:
+            pass
 
     rc, out, _ = run(["git", "tag", "-l"], cwd=path)
     tags = out.split() if rc == 0 else []
@@ -282,7 +296,7 @@ def sync_signers(name, dry=False):
         raise SystemExit(f"key home missing: {KEY_HOME}")
     if len(pubs) != EXPECTED_KEYS:
         raise SystemExit(f"refusing: {len(pubs)} canonical pubs, expected {EXPECTED_KEYS}")
-    path = os.path.join(REPO_ROOT, name)
+    path = ROSTER.get(name, os.path.join(REPO_ROOT, name))
     principal = name.lower()
     lines = []
     for p in pubs:
@@ -601,7 +615,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(min(n, 4096)) or "{}")
             name = req.get("repo")
-            if name not in REPOS:
+            if name not in ROSTER:
                 return self._send('{"error":"unknown repo"}', code=400)
             key_n = req.get("key")
             if key_n is not None and key_n not in (1, 2, 3, 4):
