@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.1.0"
+MUDRA_VERSION = "0.1.1"
 
 import http.server
 import json
@@ -37,11 +37,13 @@ SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya
 EXPECTED_KEYS = 4
 
 
-def run(cmd, cwd=None, timeout=120, input_=None):
+def run(cmd, cwd=None, timeout=120, input_=None, env=None):
     """Run a command; return (rc, stdout, stderr). Never raises on rc != 0."""
     try:
         p = subprocess.run(cmd, cwd=cwd, timeout=timeout, input=input_,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True,
+                           env={**os.environ, **env} if env else None,
+                           stdin=subprocess.DEVNULL if input_ is None else None)
         return p.returncode, p.stdout, p.stderr
     except FileNotFoundError:
         return 127, "", f"{cmd[0]}: not found"
@@ -326,10 +328,24 @@ class Ceremony:
             if rc:
                 raise RuntimeError(f"download failed: {err}")
             mpath = os.path.join(tmp, manifest)
-            self.say("signing the manifest — 👆 TOUCH YOUR KEY NOW")
+            # The FIDO2 PIN must arrive via a GUI askpass, never a terminal:
+            # mudra's subprocess has no usable TTY (that fight is exactly what
+            # broke ceremony #1). zenity pops a native dialog over the desk.
+            env = None
+            if shutil.which("zenity"):
+                askpass = os.path.join(tmp, "askpass.sh")
+                with open(askpass, "w") as f:
+                    f.write("#!/bin/sh\nexec zenity --password "
+                            "--title='mudra — FIDO2 PIN for the seal'\n")
+                os.chmod(askpass, 0o700)
+                env = {"SSH_ASKPASS": askpass, "SSH_ASKPASS_REQUIRE": "force"}
+                self.say("signing — PIN dialog will pop, then 👆 TOUCH YOUR KEY")
+            else:
+                self.say("zenity missing — PIN falls back to the serve terminal; "
+                         "signing — 👆 TOUCH YOUR KEY NOW")
             rc, _, err = run(["ssh-keygen", "-Y", "sign",
                               "-n", f"{name.lower()}-release",
-                              "-f", SIGN_KEY, mpath], timeout=90)
+                              "-f", SIGN_KEY, mpath], timeout=120, env=env)
             if rc:
                 raise RuntimeError(f"sign failed: {err}")
             self.say("signed. uploading the seal")

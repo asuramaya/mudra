@@ -17,3 +17,11 @@
 - Local GUI (`serve`, 127.0.0.1 only): family cards, AWAITING SEAL queue,
   live ceremony log, the TOUCH YOUR KEY banner. Family palette.
 - Offline smoke: fixtures + throwaway keys; no gh, no network, no hardware.
+
+## 0.1.1 — the seal goes GUI-native (2026-07-19)
+
+- FIDO2 PIN collection moves to a zenity askpass dialog (SSH_ASKPASS_REQUIRE=force):
+  ceremony #1 failed fighting for a TTY inside the HTTP thread; the browser is
+  now the only place the operator looks — click, PIN dialog, touch.
+- Subprocesses get stdin=/dev/null when no input is piped — no more accidental
+  terminal interaction from the serve window.
