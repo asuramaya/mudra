@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.1"
+MUDRA_VERSION = "0.3.2"
 
 import http.server
 import json
@@ -321,8 +321,12 @@ def sync_signers(name, dry=False):
     if embedded_block(install_sh) is not None:
         with open(install_sh) as f:
             content = f.read()
+        # Embedded copy is BYTE-IDENTICAL to the anchor file, trailing newline
+        # included — so a repo's CI may byte-compare the two naively and be
+        # right. (tjmax's find: the 0.3.x writer omitted the newline in the
+        # embedded copy, false-drifting every byte-for-byte check.)
         content = re.sub(r"RELEASE_ALLOWED_SIGNERS='[^']*'",
-                         lambda _: "RELEASE_ALLOWED_SIGNERS='" + body + "'",
+                         lambda _: "RELEASE_ALLOWED_SIGNERS='" + body + "\n'",
                          content)
         with open(install_sh, "w") as f:
             f.write(content)

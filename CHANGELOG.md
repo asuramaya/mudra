@@ -65,3 +65,10 @@
   alongside <artifact>.sha256; sig = <manifest>.sig either way. The desk had
   mislabeled phanspeed v0.30.1 "NO MANIFEST (broken)" for speaking the better
   dialect.
+
+## 0.3.2 — byte-identical twins (2026-07-19)
+
+- sync-signers writes the embedded install.sh copy BYTE-IDENTICAL to the
+  anchor file, trailing newline included (tjmax's find: the omitted newline
+  false-drifted every byte-for-byte CI compare — coldspot's signing-sync was
+  red on both post-arming pushes because of it).
