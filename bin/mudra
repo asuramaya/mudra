@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.2.0"
+MUDRA_VERSION = "0.2.1"
 
 import http.server
 import json
@@ -365,10 +365,17 @@ class Ceremony:
             self.say(f"ARMING {name}: rebuilding anchor from {KEY_HOME}")
             sync_signers(name)
             self.say("anchor + embedded copy rebuilt (4 keys)")
-            rc, out, err = run(["git", "add", "-A"], cwd=path)
+            # SCOPED add — never -A: the ceremony owns exactly two files, and
+            # a working tree may hold the seat's unrelated (untracked) session
+            # files. `git add -A` here once swept .claude/.mcp.json into a
+            # PUBLIC repo (coldspot, 2026-07-19) — the desk's one real incident.
+            arm_files = ["release-signing/allowed_signers"]
+            if embedded_block(os.path.join(path, "install.sh")) is not None:
+                arm_files.append("install.sh")
+            rc, out, err = run(["git", "add", "--"] + arm_files, cwd=path)
             rc2, _, err2 = run(["git", "commit", "-m",
-                                "arm release verification: pin the master identity"],
-                               cwd=path)
+                                "arm release verification: pin the master identity",
+                                "--"] + arm_files, cwd=path)
             if rc or rc2:
                 raise RuntimeError(f"arming commit failed: {err or err2}")
             rc, _, err = run(["git", "push"], cwd=path, timeout=60)

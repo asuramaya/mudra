@@ -43,3 +43,11 @@
   the authenticator enforces handle↔credential, a wrong pick only fails clean.
 - Desk token: serve prints a one-boot tokened URL; loopback is any-local-user
   reachable, the token keeps the desk single-operator (cookie after first visit).
+
+## 0.2.1 — the scoped arm (2026-07-19)
+
+- SECURITY: the arming commit adds ONLY release-signing/allowed_signers (+
+  install.sh when an embedded twin exists) — never `git add -A`. 0.1.x swept a
+  seat's untracked session files (.claude/, .mcp.json) into the public
+  coldspot repo during ceremony #1; no credentials exposed (local paths and
+  a localhost URL only), history rewritten out by the operator's hand.
