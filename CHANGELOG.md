@@ -89,3 +89,14 @@
   warning only when the action isn't installed yet (`make install-polkit`,
   needs root — see polkit/README.md), so a fresh checkout never locks itself
   out before its first install step.
+
+## 0.3.5 — no command to remember (2026-07-27)
+
+- `mudra open` reads the running serve's session (written atomically,
+  0600, to ~/.config/mudra/session.json on every boot) and launches the
+  default browser straight into an authenticated desk — no journalctl,
+  no copy-pasted token URL. Dead/stale session detected via the recorded
+  pid, with a clear one-line fix instead of a silent bad open.
+- desktop/mudra.desktop + `make install-launcher` (no root) puts a real
+  app-grid icon on it — the point of a desk is dodging bash incantations,
+  not adding new ones to memorize.

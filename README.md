@@ -20,8 +20,17 @@ just makes it one click plus one touch.
 ## The desk (GUI)
 
 ```sh
-make serve          # → http://127.0.0.1:7770 (localhost only)
+make serve          # → http://127.0.0.1:7770 (localhost only), autostarts
+                     #   as a systemd --user unit once installed — see below
+bin/mudra open       # opens it in your browser, already authenticated —
+                     # no token to remember, no journalctl. Or just click
+                     # the app-grid icon (make install-launcher).
 ```
+
+Access is loopback-only, one-boot-token-gated, and — once
+`make install-polkit` has run once (needs root, one time) — also asks for
+your fingerprint/password on the operator's own screen before minting a
+session, on top of the token. See `polkit/README.md`.
 
 Every repo renders as a card: version, tag state, anchor state
 (armed ⚔ / inert / none), embedded-copy drift, working-tree dirt, and the
