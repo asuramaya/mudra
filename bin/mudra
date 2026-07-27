@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.5"
+MUDRA_VERSION = "0.3.6"
 
 import http.server
 import json
@@ -33,12 +33,20 @@ HOME = os.path.expanduser("~")
 REPO_ROOT = os.environ.get("MUDRA_REPO_ROOT", os.path.join(HOME, "code", "REPOS"))
 KEY_HOME = os.environ.get("MUDRA_KEY_HOME", os.path.join(HOME, ".ssh", "asuramaya-master"))
 DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestalt",
-                 "sutra", "~/code/rotten-apple"]
+                 "sutra", "~/code/rotten-apple", "mudra"]
+# mudra tracks ITSELF too — it's not exempt from the doctrine it enforces.
+# self_path resolves to wherever THIS script's repo actually lives (not
+# necessarily REPO_ROOT/mudra — matters if MUDRA_REPO_ROOT is overridden,
+# e.g. by tests/smoke.sh's fixture roots), overriding the plain-name lookup.
+_self_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Roster entries are names under REPO_ROOT, or paths (anything with a "/").
 # ROSTER maps display name -> absolute path; order is the desk's card order.
 ROSTER = {}
 for _e in [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).split(",") if r]:
-    _p = os.path.expanduser(_e) if "/" in _e else os.path.join(REPO_ROOT, _e)
+    if _e == "mudra":
+        _p = _self_path
+    else:
+        _p = os.path.expanduser(_e) if "/" in _e else os.path.join(REPO_ROOT, _e)
     ROSTER[os.path.basename(_p.rstrip("/"))] = _p
 REPOS = list(ROSTER)
 PORT = int(os.environ.get("MUDRA_PORT", "7770"))

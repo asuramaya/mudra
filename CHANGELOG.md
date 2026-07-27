@@ -100,3 +100,12 @@
 - desktop/mudra.desktop + `make install-launcher` (no root) puts a real
   app-grid icon on it — the point of a desk is dodging bash incantations,
   not adding new ones to memorize.
+
+## 0.3.6 — mudra tracks itself (2026-07-27)
+
+- Roster grows a ninth entry: mudra. It is not exempt from the doctrine it
+  enforces on the other eight — its own card now shows real anchor/tag
+  state (currently: never tagged, anchor none, same "seat's move" bucket
+  as any other pre-first-release repo). Resolved via the running script's
+  own path, not an assumed REPO_ROOT/mudra, so a relocated checkout or a
+  MUDRA_REPO_ROOT override doesn't point the self-entry at nothing.
