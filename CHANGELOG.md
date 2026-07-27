@@ -77,3 +77,15 @@
 
 - The 🔑 dropdown IS the indicator now: it turns green when the selection
   matches the detected key; the separate "detected" chip is gone.
+
+## 0.3.4 — polkit gate on top of the token (2026-07-27)
+
+- Opening the desk's token URL for the first time (minting a session cookie)
+  now also has to clear a polkit check (`com.asuramaya.mudra.open-desk`,
+  `auth_self_keep`) — the operator's real fingerprint/password prompt on the
+  operator's own screen, layered on top of the URL token rather than
+  replacing it. Already-cookied requests (the GUI's status/log polling) are
+  never re-prompted. Fails CLOSED on a real denial; fails OPEN with a loud
+  warning only when the action isn't installed yet (`make install-polkit`,
+  needs root — see polkit/README.md), so a fresh checkout never locks itself
+  out before its first install step.

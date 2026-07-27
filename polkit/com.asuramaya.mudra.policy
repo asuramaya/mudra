@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+
+  <vendor>asuramaya</vendor>
+
+  <action id="com.asuramaya.mudra.open-desk">
+    <description>Open the mudra seal desk</description>
+    <message>Authenticate to open the release seal desk</message>
+    <defaults>
+      <!-- Loopback-bound, single-machine desk: only the ACTIVE local session
+           may authenticate (no inactive/remote session, no "any user"),
+           verifying the SAME user who's sitting at the screen — fingerprint
+           or password via whatever the desktop's polkit agent offers.
+           _keep caches the grant briefly so normal use isn't re-prompted on
+           every request; mudra only invokes this check once per new
+           token-URL visit, never on cookie-authenticated polling. -->
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+</policyconfig>

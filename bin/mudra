@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.3"
+MUDRA_VERSION = "0.3.4"
 
 import http.server
 import json
@@ -44,6 +44,7 @@ PORT = int(os.environ.get("MUDRA_PORT", "7770"))
 SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya_master_1"))
 EXPECTED_KEYS = 4
 KEYMAP_PATH = os.path.join(HOME, ".config", "mudra", "keymap.json")
+POLKIT_ACTION = "com.asuramaya.mudra.open-desk"
 
 
 # ------------------------------------------------- physical key detection
@@ -579,6 +580,31 @@ refresh(); setInterval(refresh, 30000);
 TOKEN = None   # set by serve(); the desk is single-operator by construction
 
 
+def polkit_authorize():
+    """Gate the desk behind the ACTIVE session's own auth (fingerprint/
+    password via whatever agent the desktop has registered), on top of the
+    token. Checked against mudra serve's own pid — it runs in the operator's
+    graphical session, so the agent prompts on the operator's real screen.
+
+    Fails CLOSED on a real denial (wrong password, cancelled dialog, timeout)
+    — that is the entire point. Fails OPEN, loudly, only when polkit itself
+    or this action isn't installed yet (pkcheck missing, or the .policy file
+    from polkit/com.asuramaya.mudra.policy hasn't been copied into
+    /usr/share/polkit-1/actions/ — that install step needs root and is never
+    mudra's to take), so a fresh checkout degrades to token-only instead of
+    locking the desk before its first `make install-polkit`."""
+    rc, _, err = run(["pkcheck", "-p", str(os.getpid()), "-u",
+                      "--action-id", POLKIT_ACTION], timeout=90)
+    if rc == 0:
+        return True
+    if "is not registered" in err or "not found" in err:
+        sys.stderr.write(f"mudra: polkit action not installed ({err.strip()}) — "
+                         "falling back to token-only. See polkit/README or "
+                         "run `make install-polkit`.\n")
+        return True
+    return False
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def _send(self, body, ctype="application/json", code=200, cookie=None):
         data = body.encode() if isinstance(body, str) else body
@@ -596,13 +622,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _authed(self):
         """The serve URL carries a one-boot token; the first visit sets it as
-        a cookie. Loopback is same-host-ANY-user reachable — the token keeps
-        the desk single-operator."""
+        a cookie. Loopback is same-host-ANY-user reachable — the token alone
+        used to be the whole gate. Now the token visit ALSO has to clear
+        polkit_authorize() (fingerprint/password on the operator's own
+        screen) before a cookie is minted — an already-cookied request is
+        NOT re-prompted (that would fire on every /api/status poll)."""
         if TOKEN is None:
             return True
         q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         if q.get("token", [None])[0] == TOKEN:
-            return True
+            return polkit_authorize()
         cookies = self.headers.get("Cookie", "")
         return any(c.strip() == f"mudra={TOKEN}" for c in cookies.split(";"))
 
