@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=mudra — seal desk
+Name=mudra
 GenericName=Release seal desk
-Comment=Open the release seal desk (arms/seals the pill family's signed releases)
+Comment=Arm and seal signed releases
 Exec=/usr/bin/python3 /home/asuramaya/code/REPOS/mudra/bin/mudra open
 Icon=security-high
 Terminal=false

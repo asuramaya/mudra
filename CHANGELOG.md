@@ -115,3 +115,17 @@
 - Dropped the mission-statement tagline from the page footer (operator:
   "a bit cringe" — fair). Just the version now; the doctrine still lives
   in README.md/FAMILY.md where it belongs, not repeated as page chrome.
+
+## 0.3.8 — the rest of the cringe sweep (2026-07-27)
+
+- Launcher and page <title> both just say "mudra" now, not "mudra — the
+  seal desk" (same trim as the footer).
+- Dropped decorative emoji throughout: the ⚔ on "armed" chips, 🔑 in the
+  key picker and "learned this device" log line (plain "Key N" now), the
+  ✓ and shouting on the ceremony's success line ("sealed: ..." not
+  "SEALED ✓ ..."), and 👆 on the touch prompts. TOUCH YOUR KEY NOW keeps
+  its caps — genuine UX reason (the one moment you can't miss) and the
+  page JS keys off the literal substring "TOUCH" to show the banner —
+  just lost the finger.
+- "scanning the family…" → "scanning releases…": internal team jargon
+  cut from a string an external/public user would actually read.

@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.7"
+MUDRA_VERSION = "0.3.8"
 
 import http.server
 import json
@@ -436,10 +436,10 @@ class Ceremony:
                             "--title='mudra — FIDO2 PIN for the seal'\n")
                 os.chmod(askpass, 0o700)
                 env = {"SSH_ASKPASS": askpass, "SSH_ASKPASS_REQUIRE": "force"}
-                self.say("signing — PIN dialog will pop, then 👆 TOUCH YOUR KEY")
+                self.say("signing — PIN dialog will pop, then TOUCH YOUR KEY")
             else:
                 self.say("zenity missing — PIN falls back to the serve terminal; "
-                         "signing — 👆 TOUCH YOUR KEY NOW")
+                         "signing — TOUCH YOUR KEY NOW")
             sign_key = (os.path.join(KEY_HOME, f"id_asuramaya_master_{key_n}")
                         if key_n else SIGN_KEY)
             self.say(f"signing with handle {os.path.basename(sign_key)}")
@@ -473,13 +473,13 @@ class Ceremony:
                                input_=mbytes)
             if rc:
                 raise RuntimeError(f"signature verify-back failed: {err}")
-            self.say(f"SEALED ✓ {name} {tag} — hash chain and signature verify "
+            self.say(f"sealed: {name} {tag} — hash chain and signature verify "
                      "against the armed anchor, end-user path")
             if key_n:
                 fp = device_fingerprint()
                 if fp and load_keymap().get(fp) != key_n:
                     learn_key(fp, key_n)
-                    self.say(f"learned: connected device ({fp}) = 🔑 {key_n} — "
+                    self.say(f"learned: connected device ({fp}) = key {key_n} — "
                              "auto-selected from now on")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -491,7 +491,7 @@ CEREMONY = Ceremony()
 # --------------------------------------------------------------------- GUI
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
-<title>mudra — the seal desk</title><style>
+<title>mudra</title><style>
 :root { --accent:#b9acff; --dim:#9aa0a6; --good:#4caf50; --warn:#ffbb33; --bad:#ff5b5b;
         --bg:#1b1d1a; --card:#262924; --fg:#e8eaed; }
 body { background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif;
@@ -522,8 +522,8 @@ label { color:var(--dim); font-size:.85em; }
 footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
 </style></head><body>
 <h1>mudra</h1>
-<div id="touch">👆 TOUCH YOUR KEY NOW</div>
-<div id="repos">scanning the family…</div>
+<div id="touch">TOUCH YOUR KEY NOW</div>
+<div id="repos">scanning releases…</div>
 <pre id="log"></pre>
 <footer>v%VER%</footer>
 <script>
@@ -537,7 +537,7 @@ async function refresh(){
     div.className='card'+(seal?' queue':'');
     let chips='';
     chips+=chip('v'+(s.version||'?'), s.tagged?'dimc':'warn');
-    chips+=chip(s.anchor==='armed'?'armed ⚔':'anchor '+s.anchor,
+    chips+=chip(s.anchor==='armed'?'armed':'anchor '+s.anchor,
                 s.anchor==='armed'?'ok':(s.anchor==='none'?'dimc':'warn'));
     if(s.embedded_ok===false) chips+=chip('embedded drift','bad');
     if(s.dirty) chips+=chip('dirty tree','warn');
@@ -547,7 +547,7 @@ async function refresh(){
       const sel=document.createElement('select');
       sel.title='which physical key is plugged in (handle N needs key N)';
       for(let i=1;i<=4;i++){const o=document.createElement('option');
-        o.value=i;o.textContent='🔑 '+i;sel.appendChild(o);}
+        o.value=i;o.textContent='Key '+i;sel.appendChild(o);}
       sel.value=d.detected||localStorage.getItem('mudraKey')||'1';
       const paint=()=>{
         sel.className=(d.detected&&+sel.value===d.detected)?'det':'';
