@@ -109,3 +109,9 @@
   as any other pre-first-release repo). Resolved via the running script's
   own path, not an assumed REPO_ROOT/mudra, so a relocated checkout or a
   MUDRA_REPO_ROOT override doesn't point the self-entry at nothing.
+
+## 0.3.7 — quieter footer (2026-07-27)
+
+- Dropped the mission-statement tagline from the page footer (operator:
+  "a bit cringe" — fair). Just the version now; the doctrine still lives
+  in README.md/FAMILY.md where it belongs, not repeated as page chrome.

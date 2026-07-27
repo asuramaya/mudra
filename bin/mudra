@@ -13,7 +13,7 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.6"
+MUDRA_VERSION = "0.3.7"
 
 import http.server
 import json
@@ -525,8 +525,7 @@ footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
 <div id="touch">👆 TOUCH YOUR KEY NOW</div>
 <div id="repos">scanning the family…</div>
 <pre id="log"></pre>
-<footer>queue is derived from reality: a published release without a .sig IS the queue.
-mudra holds no key material; the touch is yours alone. · v%VER%</footer>
+<footer>v%VER%</footer>
 <script>
 const chip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
 async function refresh(){
