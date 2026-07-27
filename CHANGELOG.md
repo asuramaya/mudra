@@ -129,3 +129,23 @@
   just lost the finger.
 - "scanning the family…" → "scanning releases…": internal team jargon
   cut from a string an external/public user would actually read.
+
+## 0.3.9 — reads both layouts (2026-07-27)
+
+- REPO-STANDARD.md (2026-07-27) moves VERSION and release-signing/ under
+  packaging/ as part of a twelve-row root; kast adopted it first and
+  vanished from the queue ("v? anchor=none no VERSION") since both paths
+  were hardcoded at repo root. version_path()/anchor_file()/anchor_rel()
+  now check root then packaging/, root first so an unmigrated repo never
+  pays a stat for the newer path (alfred, live-fixed while I was away,
+  handed back uncommitted for review — see decision graph).
+- Fixed one latent case in the handoff before committing: a repo that has
+  migrated VERSION but never armed before (gestalt: anchor=none today)
+  would have had its FIRST anchor created back at the old root — silently
+  reintroducing root clutter on the one file mudra itself writes. Fresh-
+  anchor creation now checks packaging/VERSION's presence to pick the
+  layout, not a fixed default.
+- New smoke fixture (fakepackaged) covers both: reading VERSION from
+  packaging/, and a first-ever arm landing under packaging/ instead of
+  root. Neither was exercised by the existing fixture, which is exactly
+  why the gap wasn't caught before.

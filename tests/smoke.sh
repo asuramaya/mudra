@@ -22,7 +22,15 @@ done
   && printf "#!/bin/sh\nRELEASE_ALLOWED_SIGNERS=''\n" > install.sh \
   && git add -A && git -c user.email=s@s -c user.name=s commit -qm x )
 
-ENV="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakepill MUDRA_KEY_HOME=$T/keys"
+# Second fixture: a repo already on the packaging/ layout (REPO-STANDARD.md,
+# 2026-07-27) with NO anchor yet in EITHER location — the first-ever-arm
+# case that must create release-signing/ under packaging/, not root.
+mkdir -p "$T/repos/fakepackaged/packaging"
+( cd "$T/repos/fakepackaged" && git init -q . \
+  && echo 0.1.0 > packaging/VERSION \
+  && git add -A && git -c user.email=s@s -c user.name=s commit -qm x )
+
+ENV="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakepill,fakepackaged MUDRA_KEY_HOME=$T/keys"
 
 # status --no-remote --json names the repo and derives a state
 out="$(env $ENV "$MUDRA" status --no-remote --json)" \
@@ -49,5 +57,28 @@ env $ENV "$MUDRA" sync-signers fakepill >/dev/null 2>&1 \
 # audit: divergence must be FOUND — anchor now differs from (3-key) canon
 env $ENV "$MUDRA" audit >/dev/null 2>&1 \
   && die "audit missed key-home divergence" || say "audit: catches divergence ok"
+
+# packaging/ layout: status reads VERSION from packaging/, not root
+out="$(env $ENV "$MUDRA" status --no-remote --json)" \
+  && echo "$out" | grep -q '"fakepackaged"' \
+  && echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); \
+     r=[x for x in d['repos'] if x['name']=='fakepackaged'][0]; \
+     sys.exit(0 if r['version']=='0.1.0' else 1)" \
+  && say "packaging/ layout: version_path reads packaging/VERSION ok" \
+  || die "packaging/ layout: version not read from packaging/VERSION"
+
+# packaging/ layout, first-ever arm: must CREATE under packaging/, not root
+# (id_fake_4.pub was removed above — restore all 4 for this repo's own arm)
+for i in 1 2 3 4; do
+  [ -f "$T/keys/id_fake_$i.pub" ] || ssh-keygen -q -y -f "$T/keys/id_fake_$i" \
+    > "$T/keys/id_fake_$i.pub" 2>/dev/null
+done
+env $ENV "$MUDRA" sync-signers fakepackaged >/dev/null 2>&1
+if [ -s "$T/repos/fakepackaged/packaging/release-signing/allowed_signers" ] \
+   && [ ! -e "$T/repos/fakepackaged/release-signing" ]; then
+  say "packaging/ layout: fresh anchor created under packaging/, not root ok"
+else
+  die "packaging/ layout: fresh anchor landed at the wrong path (root clutter reintroduced)"
+fi
 
 [ "$FAIL" = 0 ] && echo "SMOKE OK" || { echo "SMOKE FAILED"; exit 1; }
