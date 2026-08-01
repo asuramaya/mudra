@@ -13,8 +13,6 @@
 # The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
 # is the touch — that is the operator's hand, by design.
 
-MUDRA_VERSION = "0.3.9"
-
 import http.server
 import json
 import os
@@ -38,7 +36,17 @@ DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestal
 # self_path resolves to wherever THIS script's repo actually lives (not
 # necessarily REPO_ROOT/mudra — matters if MUDRA_REPO_ROOT is overridden,
 # e.g. by tests/smoke.sh's fixture roots), overriding the plain-name lookup.
-_self_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up from src/bin/mudra (REPO-STANDARD.md's tree fold, 2026-08-01)
+# — two would land on src/ itself, silently pointing every self-lookup
+# (VERSION, the anchor, packaging/VERSION) at the wrong directory.
+_self_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# One version constant (REPO-STANDARD.md): read from packaging/VERSION at
+# import time rather than hand-duplicated here, so the footer can never drift
+# from the canonical file the way sutra's did for eleven straight commits
+# (decision afda1ee0) — a literal MUDRA_VERSION string is exactly the shape
+# check-repo's literal-version-string check exists to catch.
+with open(os.path.join(_self_path, "packaging", "VERSION")) as _f:
+    MUDRA_VERSION = _f.read().strip()
 # Roster entries are names under REPO_ROOT, or paths (anything with a "/").
 # ROSTER maps display name -> absolute path; order is the desk's card order.
 ROSTER = {}
@@ -640,7 +648,7 @@ def polkit_authorize():
     Fails CLOSED on a real denial (wrong password, cancelled dialog, timeout)
     — that is the entire point. Fails OPEN, loudly, only when polkit itself
     or this action isn't installed yet (pkcheck missing, or the .policy file
-    from polkit/com.asuramaya.mudra.policy hasn't been copied into
+    from src/polkit/com.asuramaya.mudra.policy hasn't been copied into
     /usr/share/polkit-1/actions/ — that install step needs root and is never
     mudra's to take), so a fresh checkout degrades to token-only instead of
     locking the desk before its first `make install-polkit`."""
@@ -650,7 +658,7 @@ def polkit_authorize():
         return True
     if "is not registered" in err or "not found" in err:
         sys.stderr.write(f"mudra: polkit action not installed ({err.strip()}) — "
-                         "falling back to token-only. See polkit/README or "
+                         "falling back to token-only. See src/polkit/README.md or "
                          "run `make install-polkit`.\n")
         return True
     return False

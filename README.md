@@ -17,20 +17,31 @@ are FIDO2-resident and non-extractable, and the one act mudra cannot and
 will not do is the touch. That is the operator's hand, by design — mudra
 just makes it one click plus one touch.
 
+## Map
+
+| | |
+|---|---|
+| Use it | [docs/USAGE.md](docs/USAGE.md) |
+| Change it | [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) |
+| Understand how it's built | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Cut a release | [docs/RELEASING.md](docs/RELEASING.md) |
+| See what changed | [docs/CHANGELOG.md](docs/CHANGELOG.md) |
+| Report a vulnerability | [.github/SECURITY.md](.github/SECURITY.md) |
+
 ## The desk (GUI)
 
 ```sh
-make serve          # → http://127.0.0.1:7770 (localhost only), autostarts
-                     #   as a systemd --user unit once installed — see below
-bin/mudra open       # opens it in your browser, already authenticated —
-                     # no token to remember, no journalctl. Or just click
-                     # the app-grid icon (make install-launcher).
+make serve              # → http://127.0.0.1:7770 (localhost only), autostarts
+                         #   as a systemd --user unit once installed — see below
+src/bin/mudra open       # opens it in your browser, already authenticated —
+                         # no token to remember, no journalctl. Or just click
+                         # the app-grid icon (make install-launcher).
 ```
 
 Access is loopback-only, one-boot-token-gated, and — once
 `make install-polkit` has run once (needs root, one time) — also asks for
 your fingerprint/password on the operator's own screen before minting a
-session, on top of the token. See `polkit/README.md`.
+session, on top of the token. See `src/polkit/README.md`.
 
 Every repo renders as a card: version, tag state, anchor state
 (armed ⚔ / inert / none), embedded-copy drift, working-tree dirt, and the
@@ -44,12 +55,12 @@ signature exactly as an end user would — sealed means *proven* sealed.
 ## The CLI (same verbs, no browser)
 
 ```sh
-bin/mudra status [--json] [--no-remote]   # the family at a glance
-bin/mudra audit  [--remote]               # invariants: same 4 keys everywhere,
-                                          # embedded twins identical, principals sane
-bin/mudra sync-signers <repo> [--dry]     # rebuild an anchor from the key home
-                                          # (rebuild-from-all, refuses != 4 keys)
-bin/mudra seal <repo> [--arm]             # the full ceremony, terminal edition
+src/bin/mudra status [--json] [--no-remote]   # the family at a glance
+src/bin/mudra audit  [--remote]               # invariants: same 4 keys everywhere,
+                                              # embedded twins identical, principals sane
+src/bin/mudra sync-signers <repo> [--dry]     # rebuild an anchor from the key home
+                                              # (rebuild-from-all, refuses != 4 keys)
+src/bin/mudra seal <repo> [--arm]             # the full ceremony, terminal edition
 ```
 
 ## Environment

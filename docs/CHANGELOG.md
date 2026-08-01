@@ -160,3 +160,40 @@
   just the trigger, nothing else from REPO-STANDARD's twelve-row convergence
   (src/ fold, docs/, community files, check-repo) — that's hygiene queued
   for its own pass, this was the one gap worth landing alone.
+
+## 0.4.0 — REPO-STANDARD convergence (2026-08-01)
+
+- The tree fold alfred specified (msg 2591, operator's direct instruction:
+  sutra and mudra converge before either one is sealed again): bin/,
+  desktop/, polkit/ -> src/; CHANGELOG.md -> docs/; SECURITY.md -> .github/;
+  VERSION -> packaging/VERSION. Ten root rows: src/ docs/ packaging/ tests/
+  .github/ README.md LICENSE Makefile .gitignore .gitattributes.
+- Every reference to the old bin/mudra path updated in the same commit —
+  Makefile, tests/smoke.sh, the desktop launcher's Exec=, the polkit
+  README's install command, and mudra's own comments — plus the live,
+  already-running systemd unit and the already-installed desktop launcher
+  on this machine, both reinstalled/restarted and confirmed serving from
+  the new path before this commit landed. Alfred's warning (msg 2591) was
+  specific: "this is the desk they drive by hand."
+- Fixed a self-referential gap the move would otherwise have introduced
+  silently: `_self_path` computed two directories up from `__file__`,
+  correct for bin/mudra but wrong by one level for src/bin/mudra — it
+  would have resolved to src/ instead of the repo root, silently blinding
+  mudra's own roster entry (the exact failure shape kast hit when
+  REPO-STANDARD first landed on it). Now three levels up, confirmed via
+  direct inspection (`_self_path` resolves to the repo root, `mudra
+  status --no-remote` reads v0.4.0 correctly) as well as the smoke suite.
+- Also collapsed a second duplication while the file was already open:
+  `MUDRA_VERSION` was a hand-maintained literal string, bumped by hand
+  alongside VERSION on every release — precisely the shape that left sutra
+  red for eleven straight commits (decision afda1ee0, the CI-drift class).
+  It's now read from packaging/VERSION at import time; check-repo's
+  literal-version-string check would have failed on mudra's own file
+  otherwise.
+- Added docs/USAGE.md, docs/ARCHITECTURE.md (with a Standard exemptions
+  table recording install.sh/uninstall.sh's absence — mudra installs via
+  two make targets, not a shell installer), docs/RELEASING.md, the two
+  missing community files under .github/, .gitattributes, a README ## Map
+  block, and a check-repo target (`git ls-files | cut -d/ -f1 | sort -u`,
+  never a hand-maintained skip list) ordered first in ci.yml, ahead of
+  `make smoke`.

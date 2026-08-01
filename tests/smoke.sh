@@ -2,7 +2,7 @@
 # mudra smoke — offline, fixture-only: no gh, no network, no real keys.
 set -u
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-MUDRA="$HERE/bin/mudra"
+MUDRA="$HERE/src/bin/mudra"
 FAIL=0
 say() { echo "$@"; }
 die() { echo "SMOKE FAIL: $*" >&2; FAIL=1; }

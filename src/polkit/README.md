@@ -18,7 +18,7 @@ make install-polkit
 which is exactly:
 
 ```sh
-sudo install -m644 polkit/com.asuramaya.mudra.policy /usr/share/polkit-1/actions/
+sudo install -m644 src/polkit/com.asuramaya.mudra.policy /usr/share/polkit-1/actions/
 systemctl --user restart mudra
 ```
 
