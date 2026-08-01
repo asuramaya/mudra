@@ -64,6 +64,19 @@ not a pill (RELEASE.md's artifact ruling is scoped to the six pills that ship to
 has nothing an installer would package differently from the tarball. See
 [RELEASING.md](RELEASING.md) for the running order.
 
+**Is mudra sealing itself circular?** Asked and answered before the first ceremony rather than
+discovered during it. No, cryptographically: `ssh-keygen -Y verify` is an external tool
+unrelated to mudra's own code correctness, and the actual root of trust is the operator's
+physical FIDO2 touch on the published bytes — identical whether mudra is checking its own
+release or anyone else's. There is one narrow, real asymmetry worth naming, though: for every
+other repo, the anchor lives in a *separate* git repository from mudra's own source, so a
+compromise of mudra's code alone cannot also reach another repo's anchor. For mudra sealing
+itself, the verifying code and the verified anchor sit in the *same* repo — mudra's own
+git-history integrity is the one thing both halves of that particular self-check share. This
+changes nothing about what the ceremony attests to (the operator's touch, not mudra's own
+say-so) and isn't a reason to do anything differently — it's just the honest answer to whether
+a wrinkle exists, not a reassurance that one doesn't.
+
 ## mudra's roster is wider than any one coordinator's charter
 
 `DEFAULT_REPOS` tracks **nine** repos. REPO-STANDARD.md's `packaging/` convergence effort
