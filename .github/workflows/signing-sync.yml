@@ -1,0 +1,51 @@
+name: signing-sync
+# Enforces RELEASE.md's sync-signers invariant: packaging/release-signing/
+# allowed_signers must always be either (a) empty — the pre-arming shipping
+# state, verification inert — or (b) exactly 4 well-formed lines. "Same 4
+# keys everywhere" is a CHECKED invariant here, not a convention. No embedded
+# install.sh twin to compare — mudra has none (docs/ARCHITECTURE.md's
+# Standard exemptions table) — so this check is shorter than a pill's by
+# exactly that section.
+#
+# The canonical key home is ~/.ssh/asuramaya-master/ on the operator's own
+# machine (ruling 13ee52ce) — outside every repo, never committed, never
+# reachable by a CI runner. So this check is deliberately INTERNAL-CONSISTENCY
+# ONLY: it can confirm the anchor is well-formed, but it cannot confirm it
+# still matches the operator's actual canonical keys — that comparison only
+# ever happens locally, via `make sync-signers` itself.
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify anchor is well-formed
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          import sys
+
+          anchor = open("packaging/release-signing/allowed_signers").read()
+
+          if not anchor.strip():
+              print("anchor is UNARMED (empty) — pre-signing shipping state. OK")
+              sys.exit(0)
+
+          print("anchor is ARMED — checking internal consistency.")
+          lines = [ln for ln in anchor.split("\n") if ln.strip()]
+          if len(lines) != 4:
+              sys.exit(f"expected exactly 4 lines in allowed_signers, found {len(lines)}")
+          line_re = re.compile(
+              r'^mudra namespaces="mudra-release,pills-tag" '
+              r'\S+ \S+ \S+$')
+          for ln in lines:
+              if not line_re.match(ln):
+                  sys.exit(f"malformed allowed_signers line: {ln!r}")
+          print("4 well-formed lines OK")
+          PYEOF

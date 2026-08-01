@@ -1,9 +1,14 @@
-.PHONY: smoke check check-repo serve install-polkit install-launcher install
+.PHONY: smoke check check-repo serve install-polkit install-launcher install sync-signers
 smoke:
 	bash tests/smoke.sh
 check: check-repo smoke
 serve:
 	python3 src/bin/mudra serve
+sync-signers:
+	@echo "Rebuilds packaging/release-signing/allowed_signers from the canonical"
+	@echo "keys — do NOT run casually. Only as part of mudra's own first signed"
+	@echo "release, at the operator's hand (see docs/RELEASING.md)."
+	bash packaging/sync-signers.sh
 install-polkit:
 	@echo "Needs root — installs the desk's polkit action system-wide:"
 	@echo "  sudo install -m644 src/polkit/com.asuramaya.mudra.policy /usr/share/polkit-1/actions/"

@@ -25,14 +25,13 @@ make check    # check-repo (REPO-STANDARD.md's structure gate), then smoke
 git tag v0.X.Y && git push origin v0.X.Y
 ```
 
-mudra currently has **no `release.yml`** — there is no CI pipeline that builds and publishes
-release assets on a tag push yet. Until that lands (tracked separately from this doc), cutting
-a release means manually running `git archive` for a tarball, computing its `SHA256SUMS`, and
-creating the GitHub release with those assets attached, unsigned — same shape as every
-sibling's `release.yml`, just not yet automated for mudra itself. The signing step below
-applies unchanged either way: CI publishing unsigned artifacts, never signing them, is the
-whole point — a workflow that could sign would make the GitHub account the trust root instead
-of the operator's hardware key.
+`.github/workflows/release.yml` verifies the tag matches `packaging/VERSION`, builds
+`mudra.tar.gz` + `SHA256SUMS` via `git archive`, and creates or updates the GitHub release with
+those two assets — **unsigned**. It refuses outright if `docs/CHANGELOG.md` has no section for
+the version being tagged, rather than falling back to a generated commit dump. No `.deb`: see
+[ARCHITECTURE.md](ARCHITECTURE.md#signing-itself) for why mudra's tarball is the whole artifact.
+CI publishing unsigned artifacts, never signing them, is the whole point — a workflow that
+could sign would make the GitHub account the trust root instead of the operator's hardware key.
 
 ## 3. The operator seals it
 

@@ -208,3 +208,32 @@
   removing it now would break the one repo that still needs it. Code
   unchanged — this pass only makes the trigger explicit instead of leaving
   a future reader to guess at the code's purpose.
+
+## 0.5.0 — mudra can now be released (2026-08-01)
+
+- The machinery mudra needed to seal itself, requested by alfred (msg
+  2665) as the operator's "no sealing until sutra and mudra converge" gate
+  approached lifting: `packaging/release-signing/allowed_signers`, shipping
+  EMPTY (0 bytes — the inert, pre-arming state, not "none"); `make
+  sync-signers` / packaging/sync-signers.sh (principal `mudra`, namespaces
+  `mudra-release,pills-tag`, rebuild-from-all, refuses on anything but
+  exactly 4 canonical keys — same shape as coldspot's, minus the embedded-
+  twin section mudra has no install.sh to need); .github/workflows/
+  release.yml (tag push -> tarball + SHA256SUMS, unsigned, refuses without
+  a matching docs/CHANGELOG.md section, no .deb — mudra isn't a pill and
+  has nothing an installer would package differently); .github/workflows/
+  signing-sync.yml (internal-consistency check: anchor empty or exactly 4
+  well-formed lines).
+- NOTHING WAS ARMED AND NOTHING WAS TAGGED. The anchor is genuinely empty
+  on disk (confirmed: `wc -c` = 0), sync-signers.sh was written but never
+  run, no `vX.Y.Z` tag exists. Building the machinery is not using it —
+  the physical key touch stays the operator's alone.
+- Checked the self-blindness angle explicitly, per alfred's framing (the
+  same class of bug as _self_path, one layer up): `mudra status
+  --no-remote` on mudra's own roster entry read `anchor=none` before this
+  change and `anchor=inert` after, with everything else (version, tag
+  state) unchanged — the desk sees its own new state correctly rather than
+  half-seeing it.
+- docs/RELEASING.md and docs/ARCHITECTURE.md (new "Signing itself"
+  section) updated to describe the real process now that one exists,
+  replacing the earlier "mudra has no release.yml yet" framing.

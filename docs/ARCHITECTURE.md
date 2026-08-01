@@ -11,10 +11,13 @@ src/bin/          mudra — the entire CLI + GUI server, one file
 src/desktop/      mudra.desktop — the app-grid launcher (make install-launcher, no root)
 src/polkit/       com.asuramaya.mudra.policy — the desk's polkit action (make install-polkit,
                    needs root once) — and its own README
-packaging/        VERSION (the one version constant)
+packaging/        VERSION (the one version constant), sync-signers.sh (local, run only at the
+                   operator's first-seal ceremony), release-signing/allowed_signers (ships
+                   empty — see Signing itself, below)
 tests/            smoke.sh — offline, fixture-only, no gh/network/real keys
 docs/             this file, USAGE.md, RELEASING.md, CHANGELOG.md
-.github/          ci.yml, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md
+.github/          ci.yml, release.yml, signing-sync.yml, SECURITY.md, CONTRIBUTING.md,
+                   CODE_OF_CONDUCT.md
 ```
 
 ## No stored state, by design
@@ -43,6 +46,23 @@ manifest, shells to `ssh-keygen -Y sign` against the operator's hardware key, up
 `.sig`, then re-downloads everything and verifies it back exactly as an end user's own install
 would. mudra never has a code path that can sign without the operator's own physical touch —
 see [SECURITY.md](../.github/SECURITY.md) for why that boundary is load-bearing.
+
+## Signing itself
+
+mudra tracks itself in its own roster (`_self_path`, above) and is not exempt from the
+doctrine it enforces on the other eight repos — including this one. `packaging/release-signing/
+allowed_signers` ships **empty** (the inert, pre-arming state every repo starts in) and
+`packaging/sync-signers.sh` + `make sync-signers` exist to rebuild it, exactly like any pill,
+but **arming is a decision, not a default**: nothing in this repo runs that script for you, and
+it stays empty until the operator chooses to run mudra's own first sealing ceremony.
+`.github/workflows/release.yml` builds a tarball + `SHA256SUMS` from a `vX.Y.Z` tag and
+publishes both **unsigned** — CI never signs, for mudra exactly as for everything mudra itself
+seals (see [SECURITY.md](../.github/SECURITY.md)). `.github/workflows/signing-sync.yml` checks
+the anchor is well-formed (empty, or exactly 4 lines matching mudra's own principal/namespace) —
+internal consistency only, since the canonical key home never reaches CI. No `.deb`: mudra is
+not a pill (RELEASE.md's artifact ruling is scoped to the six pills that ship to end users) and
+has nothing an installer would package differently from the tarball. See
+[RELEASING.md](RELEASING.md) for the running order.
 
 ## Reading two tree layouts during the family's own rollout
 
