@@ -168,8 +168,16 @@ git init -q --bare -b main "$BARE"
   && git remote add origin "$BARE" \
   && git push -q -u origin main )
 
-ENV3="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm MUDRA_KEY_HOME=$T/keys"
-env $ENV3 "$MUDRA" arm fakearm >/dev/null 2>&1
+# GIT_AUTHOR_*/GIT_COMMITTER_* here, not relied-on ambient config: the
+# ceremony's own arming commit (src/bin/mudra's _arm()) never sets an
+# identity itself — it's meant to be the operator's own hand, using
+# whatever git identity they already have configured, same as any commit
+# they make anywhere. That's fine on a real machine that's been committing
+# all day; it is NOT fine for a hermetic test, which must not assume the
+# runner has any global git identity at all (CI doesn't, and the smoke
+# suite caught exactly that gap the first time it actually ran on one).
+ENV3="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm MUDRA_KEY_HOME=$T/keys GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=s@s GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=s@s"
+arm_out="$(env $ENV3 "$MUDRA" arm fakearm 2>&1)"
 rc=$?
 if [ "$rc" = 0 ] \
    && [ -s "$T/repos/fakearm/packaging/release-signing/allowed_signers" ] \
@@ -177,7 +185,7 @@ if [ "$rc" = 0 ] \
    && git -C "$BARE" log -1 --format=%s main | grep -q "arm release verification"; then
   say "arm: write+commit+push ceremony ok (verified in the bare remote, not just locally)"
 else
-  die "arm ceremony didn't write+commit+push correctly (rc=$rc)"
+  die "arm ceremony didn't write+commit+push correctly (rc=$rc): $arm_out"
 fi
 
 # arm refuses an already-armed repo rather than silently re-arming
@@ -199,7 +207,7 @@ git init -q --bare -b main "$BARE2"
   && git remote add origin "$BARE2" \
   && git push -q -u origin main )
 rm -f "$T/keys/id_fake_4.pub"
-ENV4="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm2 MUDRA_KEY_HOME=$T/keys"
+ENV4="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm2 MUDRA_KEY_HOME=$T/keys GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=s@s GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=s@s"
 out="$(env $ENV4 "$MUDRA" arm fakearm2 2>&1)"
 rc=$?
 if [ "$rc" != 0 ] && echo "$out" | grep -qi "refusing\|expected"; then
