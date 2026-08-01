@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # tests/smoke.sh is offline and fixture-only (no gh, no network, no
+      # real keys) — it exercises exactly the dangerous paths: status
+      # derivation, sync-signers rebuild-from-all, audit clean-on-armed,
+      # the 3-key refusal, audit catching divergence, and the packaging/
+      # layout's first-ever-arm landing under packaging/ rather than root.
+      # Until today nothing invoked it on push — the desk that seals nine
+      # repos had a good test and no trigger.
+      - name: Smoke
+        run: make smoke

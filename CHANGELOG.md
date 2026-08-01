@@ -149,3 +149,14 @@
   packaging/, and a first-ever arm landing under packaging/ instead of
   root. Neither was exercised by the existing fixture, which is exactly
   why the gap wasn't caught before.
+
+## 0.3.10 — the smoke test finally runs (2026-08-01)
+
+- .github/workflows/ci.yml: `make smoke` on every push/PR. tests/smoke.sh
+  already covered the dangerous paths (sync-signers rebuild, the 3-key
+  refusal, audit catching divergence, the packaging/ layout's first-ever-
+  arm placement) — the gap alfred found (msg 2549) wasn't coverage, it was
+  that nothing on the desk that seals nine repos ever invoked it. Deliberately
+  just the trigger, nothing else from REPO-STANDARD's twelve-row convergence
+  (src/ fold, docs/, community files, check-repo) — that's hygiene queued
+  for its own pass, this was the one gap worth landing alone.
