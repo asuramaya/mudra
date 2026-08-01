@@ -39,13 +39,26 @@ nothing to keep in sync because it never stores what it can re-derive:
 ## The two roles that never overlap
 
 `repo_state()` / `scan()` / `audit()` only ever **read**. `sync_signers()` and the `Ceremony`
-class are the only two places mudra **writes** into a tracked repo, and each does exactly one
-thing: `sync_signers` rebuilds an anchor from the canonical key home (rebuild-from-all, never
-append, refuses on anything but exactly 4 keys); `Ceremony.seal` downloads the *published*
-manifest, shells to `ssh-keygen -Y sign` against the operator's hardware key, uploads the
-`.sig`, then re-downloads everything and verifies it back exactly as an end user's own install
-would. mudra never has a code path that can sign without the operator's own physical touch —
-see [SECURITY.md](../.github/SECURITY.md) for why that boundary is load-bearing.
+class are the only two places mudra **writes** into a tracked repo. `Ceremony.arm` and
+`Ceremony.seal` are two SEPARATE ceremonies, deliberately, not one flow with a flag: arm needs
+only the public keys (`sync_signers` rebuild-from-all, never append, refuses on anything but
+exactly 4 keys) and works on a repo with no tag at all — that has to be true, or the UI's whole
+opening move (a stranger's first act with any repo) has nowhere to happen. `Ceremony.seal`
+needs the operator's physical touch and a *published* release; it refuses outright if the
+anchor isn't armed yet rather than arming it as a side effect — bundling the two once meant
+arm could only ever run after a tag existed (release.yml's `git archive` tarball would have
+shipped mudra's own first release with a permanently empty anchor; caught before it happened,
+see [RELEASING.md](RELEASING.md)). `seal` downloads the *published* manifest, shells to
+`ssh-keygen -Y sign` against the operator's hardware key, uploads the `.sig`, then
+re-downloads everything and verifies it back exactly as an end user's own install would. mudra
+never has a code path that can sign without the operator's own physical touch — see
+[SECURITY.md](../.github/SECURITY.md) for why that boundary is load-bearing.
+
+Both ceremonies share ONE lock (`Ceremony.lock`, one `active` ceremony at a time, for any
+repo): arming writes the same anchor file a concurrent seal might be reading mid-ceremony for
+that repo, and "arm is just a local file write, no network, no touch" is exactly the reasoning
+that would justify skipping the lock and would be wrong — a write racing a read of the same
+file is a real hazard regardless of how low-stakes either side looks in isolation.
 
 ## Signing itself
 

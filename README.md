@@ -43,14 +43,17 @@ Access is loopback-only, one-boot-token-gated, and — once
 your fingerprint/password on the operator's own screen before minting a
 session, on top of the token. See `src/polkit/README.md`.
 
-Every repo renders as a card: version, tag state, anchor state
-(armed ⚔ / inert / none), embedded-copy drift, working-tree dirt, and the
-derived verdict. Releases AWAITING SEAL carry the button. If the anchor is
-still inert, the button reads ARM + SEAL and demands an extra confirmation —
-arming pins the master identity fail-closed *forever*. The ceremony streams
-its steps live; when it's time, the desk lights up: 👆 TOUCH YOUR KEY NOW.
-After upload, mudra re-downloads everything and verifies hash chain +
-signature exactly as an end user would — sealed means *proven* sealed.
+Every repo renders as a card: version, tag state, anchor state (armed / inert / none),
+embedded-copy drift, working-tree dirt, and the derived verdict. Arm and seal are two
+separate acts, each its own button, because they need different things: arming needs
+only the public keys and works on a repo with no tag at all; sealing needs the operator's
+physical touch and a published release. An unarmed repo's card carries an **ARM**
+button — click it and the desk previews which keys it's about to write before an extra
+confirmation ("arming pins the master identity fail-closed *forever*"). A repo AWAITING
+SEAL carries a **SEAL** button. The ceremony streams its steps live; when it's time to
+sign, the desk lights up: TOUCH YOUR KEY NOW. After upload, mudra re-downloads
+everything and verifies hash chain + signature exactly as an end user would — sealed
+means *proven* sealed.
 
 ## The CLI (same verbs, no browser)
 
@@ -60,7 +63,8 @@ src/bin/mudra audit  [--remote]               # invariants: same 4 keys everywhe
                                               # embedded twins identical, principals sane
 src/bin/mudra sync-signers <repo> [--dry]     # rebuild an anchor from the key home
                                               # (rebuild-from-all, refuses != 4 keys)
-src/bin/mudra seal <repo> [--arm]             # the full ceremony, terminal edition
+src/bin/mudra arm <repo>                      # rebuild + scoped commit + push, one act
+src/bin/mudra seal <repo> [--key N]           # the full ceremony, terminal edition
 ```
 
 ## Environment

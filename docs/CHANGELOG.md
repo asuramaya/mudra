@@ -280,7 +280,7 @@
   alfred's eight-repo coordination charter) so a successor doesn't
   rediscover the gap by shipping the regression.
 
-## 0.6.1 — mudra's first release (2026-08-01)
+## 0.7.0 — mudra's first release (2026-08-01)
 
 mudra is the pill family's release-seal desk. Every release ships from CI unsigned, plus a
 `SHA256SUMS` manifest; mudra derives a queue from that reality — a published release with no
@@ -314,13 +314,27 @@ The highlights, oldest to newest:
   report) is why that anchor is still visible today instead of silently gone dark. Fixed with a
   named, permanent exception and a rule that anything unrecognized fails loud, never quietly
   reads as "nothing to see here."
+- **Arming reaches the UI**: the desk's GUI could only ever arm as a side effect of sealing,
+  and sealing refuses without a published release — so for any repo without a tag yet
+  (mudra, tonight), the card rendered nothing at all, no control of any kind. Split into two
+  separate ceremonies sharing one lock: `arm` (public keys only, works on an untagged repo —
+  that is the entire point) and `seal` (the physical touch, published-release-only, and now
+  refuses cleanly if the anchor isn't armed rather than silently arming it too). The desk's
+  own **ARM** button previews which keys it's about to write before an irreversible
+  confirmation; the **SEAL** button only ever appears once a repo is both armed and actually
+  awaiting one.
 
-Also in this release: a documentation note on a testing constraint found proving that
-exception load-bearing — a copy of `src/bin/mudra` only runs from inside a real, repo-shaped
-checkout, since it reads its own version from `packaging/VERSION` at import time — and a fix
-to `docs/RELEASING.md`'s own arming order, found before it could ship a first tagged tarball
-with a permanently empty anchor (arm must happen before the tag, never bundled into the seal
-step afterward). That fix is now enforced in `release.yml` itself, not just documented: a CI
-step refuses to build the release tarball if `packaging/release-signing/allowed_signers` is
-empty at tag time, ported from gestalt hitting the identical drafting mistake independently
-and adding the guard rather than just the prose fix.
+Also in this release: a documentation note on a testing constraint found proving the
+rotten-apple exception load-bearing — a copy of `src/bin/mudra` only runs from inside a real,
+repo-shaped checkout, since it reads its own version from `packaging/VERSION` at import time —
+and a fix to `docs/RELEASING.md`'s own arming order, found before it could ship a first tagged
+tarball with a permanently empty anchor (arm must happen before the tag, never bundled into
+the seal step afterward). That fix is now enforced in `release.yml` itself, not just
+documented: a CI step refuses to build the release tarball if
+`packaging/release-signing/allowed_signers` is empty at tag time, ported from gestalt hitting
+the identical drafting mistake independently and adding the guard rather than just the prose
+fix. Also fixed in the same pass: a pre-existing bug in the seal ceremony's verify-back step,
+which resolved a path-based roster entry's (rotten-apple's) anchor from `REPO_ROOT/<name>`
+instead of its own real path — silently wrong for any repo outside `REPO_ROOT`, only ever
+"working" for mudra itself by coincidence (mudra happens to live inside `REPO_ROOT`). Found
+while already in that exact function for the arm/seal split.

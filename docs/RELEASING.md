@@ -21,6 +21,18 @@ make check    # check-repo (REPO-STANDARD.md's structure gate), then smoke
 
 ## 2. The operator arms — BEFORE the tag, not after
 
+One command, the CLI or the desk's own **ARM** button (works on any unarmed repo, tag or no
+tag — that is the entire point of it being separate from seal):
+
+```sh
+src/bin/mudra arm mudra
+```
+
+previews which 4 keys are about to be written, asks for confirmation ("arming pins the master
+identity fail-closed *forever*"), then rebuilds the anchor and makes the SCOPED commit + push
+in one act. Or, the manual three-step version underneath it, if you want to see each act on
+its own:
+
 ```sh
 make sync-signers                                              # writes the anchor, nothing else
 git add -- packaging/release-signing/allowed_signers
@@ -28,10 +40,11 @@ git commit -m "arm release verification: pin the master identity"
 git push
 ```
 
-This step is the operator's, at their hand — `KEY_HOME` is `~/.ssh/asuramaya-master`, outside
-every repo. `make sync-signers` only WRITES `packaging/release-signing/allowed_signers`; it
-never commits or pushes on its own, so the scoped commit above is a separate, deliberate act,
-exactly as [SECURITY.md](../.github/SECURITY.md) requires.
+Either way this step is the operator's, at their hand — `KEY_HOME` is
+`~/.ssh/asuramaya-master`, outside every repo. `make sync-signers` alone only WRITES
+`packaging/release-signing/allowed_signers`; it never commits or pushes on its own, which is
+why `arm` exists as the one-shot version — the scoped commit is a separate, deliberate act
+either way, exactly as [SECURITY.md](../.github/SECURITY.md) requires.
 
 **Why before the tag, and not folded into the seal ceremony afterward:** `.github/workflows/
 release.yml` builds `mudra.tar.gz` via `git archive` from the TAGGED commit, and that archive
@@ -66,13 +79,12 @@ a release is published, mudra's own desk shows mudra as AWAITING SEAL exactly li
 repo, and the ceremony runs the same way:
 
 ```sh
-src/bin/mudra seal mudra   # no --arm: step 2 already armed it
+src/bin/mudra seal mudra   # refuses if the anchor isn't armed yet — step 2 already handled that
 ```
 
-or through the GUI (the button reads plain **SEAL**, not **ARM + SEAL**, once step 2 has run —
-same as any other already-armed card). The operator verifies the published bytes, signs the
-checksum manifest offline with the FIDO2 key, and mudra uploads the detached signature and
-verifies it back as an end user would.
+or the desk's own **SEAL** button, which only appears once a repo is both armed and AWAITING
+SEAL. The operator verifies the published bytes, signs the checksum manifest offline with the
+FIDO2 key, and mudra uploads the detached signature and verifies it back as an end user would.
 
 ## Rules that don't bend
 

@@ -408,23 +408,79 @@ def sync_signers(name, dry=False):
 # ---------------------------------------------------------------- ceremony
 
 class Ceremony:
-    """One sealing at a time; steps stream into a log the GUI polls."""
+    """One ceremony at a time (arm or seal, any repo); steps stream into a
+    log the GUI polls. Arm and seal are two SEPARATE acts, deliberately: arm
+    needs only the public keys and must work on a repo with no tag at all;
+    seal needs the operator's physical touch and a published release. A
+    single shared lock still serializes them — arm writes the same anchor
+    file a concurrent seal might be reading mid-ceremony for that repo."""
     def __init__(self):
         self.lock = threading.Lock()
         self.log = []
         self.active = None    # repo name while running
-        self.done = None      # "sealed" | "failed"
+        self.done = None      # "armed" | "sealed" | "failed"
 
     def say(self, msg):
         self.log.append({"t": time.strftime("%H:%M:%S"), "msg": msg})
 
-    def seal(self, name, arm=False, key_n=None):
+    def _begin(self, name):
         with self.lock:
             if self.active:
                 raise RuntimeError(f"ceremony already running for {self.active}")
             self.active, self.done, self.log = name, None, []
+
+    def arm(self, name):
+        self._begin(name)
         try:
-            self._seal(name, arm, key_n)
+            st = repo_state(name)
+            if st.get("missing"):
+                raise RuntimeError("repo missing from " + REPO_ROOT)
+            if st["anchor"] == "armed":
+                raise RuntimeError(f"{name} is already armed")
+            if st["anchor"] == "unrecognized-layout":
+                raise RuntimeError(f"{name} matches neither a known layout nor a "
+                                   "named exception — investigate before arming")
+            self._arm(name, st["path"])
+            self.done = "armed"
+        except Exception as exc:
+            self.say(f"FAILED: {exc}")
+            self.done = "failed"
+        finally:
+            self.active = None
+
+    def _arm(self, name, path):
+        """Rebuild the anchor from canon and commit+push it, scoped. The
+        only place mudra writes into a tracked repo besides the seal's own
+        upload — same two-file SCOPED add either way, never `git add -A`
+        (a stray `-A` once swept a seat's untracked session files into a
+        PUBLIC repo, coldspot, 2026-07-19 — the desk's one real incident)."""
+        self.say(f"ARMING {name}: rebuilding anchor from {KEY_HOME}")
+        try:
+            sync_signers(name)
+        except SystemExit as exc:
+            # sync_signers() raises SystemExit for its CLI entry point's
+            # clean traceback-free exit; a ceremony thread needs a normal
+            # exception its own except-Exception (above) will actually see.
+            raise RuntimeError(str(exc))
+        self.say("anchor + embedded copy rebuilt (4 keys)")
+        arm_files = [anchor_rel(path)]
+        if embedded_block(os.path.join(path, "install.sh")) is not None:
+            arm_files.append("install.sh")
+        rc, out, err = run(["git", "add", "--"] + arm_files, cwd=path)
+        rc2, _, err2 = run(["git", "commit", "-m",
+                            "arm release verification: pin the master identity",
+                            "--"] + arm_files, cwd=path)
+        if rc or rc2:
+            raise RuntimeError(f"arming commit failed: {err or err2}")
+        rc, _, err = run(["git", "push"], cwd=path, timeout=60)
+        if rc:
+            raise RuntimeError(f"push failed: {err}")
+        self.say("arming commit pushed — verification is now fail-closed")
+
+    def seal(self, name, key_n=None):
+        self._begin(name)
+        try:
+            self._seal(name, key_n)
             self.done = "sealed"
         except Exception as exc:
             self.say(f"FAILED: {exc}")
@@ -437,7 +493,7 @@ class Ceremony:
         finally:
             self.active = None
 
-    def _seal(self, name, arm, key_n=None):
+    def _seal(self, name, key_n=None):
         st = repo_state(name)
         path, ver = st["path"], st.get("version")
         if not ver:
@@ -454,29 +510,8 @@ class Ceremony:
         slug = rel["slug"]
 
         if st["anchor"] != "armed":
-            if not arm:
-                raise RuntimeError("anchor is not armed — re-run with arm "
-                                   "(this pins the master identity FAIL-CLOSED forever)")
-            self.say(f"ARMING {name}: rebuilding anchor from {KEY_HOME}")
-            sync_signers(name)
-            self.say("anchor + embedded copy rebuilt (4 keys)")
-            # SCOPED add — never -A: the ceremony owns exactly two files, and
-            # a working tree may hold the seat's unrelated (untracked) session
-            # files. `git add -A` here once swept .claude/.mcp.json into a
-            # PUBLIC repo (coldspot, 2026-07-19) — the desk's one real incident.
-            arm_files = [anchor_rel(path)]
-            if embedded_block(os.path.join(path, "install.sh")) is not None:
-                arm_files.append("install.sh")
-            rc, out, err = run(["git", "add", "--"] + arm_files, cwd=path)
-            rc2, _, err2 = run(["git", "commit", "-m",
-                                "arm release verification: pin the master identity",
-                                "--"] + arm_files, cwd=path)
-            if rc or rc2:
-                raise RuntimeError(f"arming commit failed: {err or err2}")
-            rc, _, err = run(["git", "push"], cwd=path, timeout=60)
-            if rc:
-                raise RuntimeError(f"push failed: {err}")
-            self.say("arming commit pushed — verification is now fail-closed")
+            raise RuntimeError("anchor is not armed — arm it first "
+                               "(this pins the master identity FAIL-CLOSED forever)")
 
         tmp = tempfile.mkdtemp(prefix="mudra-")
         try:
@@ -527,7 +562,12 @@ class Ceremony:
                 raise RuntimeError(f"manifest hash check failed: {out} {err}")
             with open(os.path.join(vdir, manifest)) as f:
                 mbytes = f.read()
-            anchor = anchor_file(os.path.join(REPO_ROOT, name))
+            # path, not REPO_ROOT/name: a pre-existing bug for path-based
+            # roster entries (rotten-apple lives outside REPO_ROOT entirely;
+            # mudra only "worked" by coincidence, since it happens to sit
+            # inside REPO_ROOT). Found while already in this function for
+            # the arm/seal split — fixed alongside it.
+            anchor = anchor_file(path)
             rc, out, err = run(["ssh-keygen", "-Y", "verify", "-f", anchor,
                                 "-I", name.lower(), "-n", f"{name.lower()}-release",
                                 "-s", os.path.join(vdir, manifest + ".sig")],
@@ -594,17 +634,23 @@ async function refresh(){
   const el=document.getElementById('repos'); el.innerHTML='';
   for(const s of d.repos){
     const div=document.createElement('div');
-    const seal=s.state==='AWAITING SEAL';
-    div.className='card'+(seal?' queue':'');
+    const armed=s.anchor==='armed';
+    // Arm and seal are two separate acts now: arm works on ANY unarmed
+    // repo regardless of tag state (that is the whole point — the old
+    // combined control rendered nothing at all for an untagged repo);
+    // seal only once armed AND a release is actually awaiting it.
+    const canArm=!armed && s.anchor!=='unrecognized-layout';
+    const canSeal=armed && s.state==='AWAITING SEAL';
+    div.className='card'+(canSeal?' queue':'');
     let chips='';
     chips+=chip('v'+(s.version||'?'), s.tagged?'dimc':'warn');
-    chips+=chip(s.anchor==='armed'?'armed':'anchor '+s.anchor,
-                s.anchor==='armed'?'ok':(s.anchor==='none'?'dimc':'warn'));
+    chips+=chip(armed?'armed':'anchor '+s.anchor,
+                armed?'ok':((s.anchor==='none'||s.anchor==='inert')?'dimc':'warn'));
     if(s.embedded_ok===false) chips+=chip('embedded drift','bad');
     if(s.dirty) chips+=chip('dirty tree','warn');
-    chips+=chip(s.state, seal?'warn':(s.state==='sealed'?'ok':'dimc'));
+    chips+=chip(s.state, canSeal?'warn':(s.state==='sealed'?'ok':'dimc'));
     div.innerHTML=`<b>${s.name}</b>${chips}`;
-    if(seal){
+    if(canSeal){
       const sel=document.createElement('select');
       sel.title='which physical key is plugged in (handle N needs key N)';
       for(let i=1;i<=4;i++){const o=document.createElement('option');
@@ -619,13 +665,29 @@ async function refresh(){
       sel.onchange=()=>{localStorage.setItem('mudraKey',sel.value);paint();};
       div.appendChild(sel);
       const btn=document.createElement('button');
-      const needArm=s.anchor!=='armed';
-      btn.textContent=needArm?'ARM + SEAL':'SEAL';
+      btn.textContent='SEAL';
       btn.onclick=async()=>{
-        if(needArm && !confirm(s.name+': arming pins the master identity FAIL-CLOSED forever. Proceed?'))return;
         btn.disabled=true;
         await fetch('/api/seal',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({repo:s.name,arm:needArm,key:parseInt(sel.value)})});
+          body:JSON.stringify({repo:s.name,key:parseInt(sel.value)})});
+        pollLog();
+      };
+      div.appendChild(btn);
+    } else if(canArm){
+      const btn=document.createElement('button');
+      btn.textContent='ARM';
+      btn.onclick=async()=>{
+        btn.disabled=true;
+        let msg=s.name+': arming pins the master identity FAIL-CLOSED forever.';
+        try{
+          const pr=await fetch('/api/arm-preview?repo='+encodeURIComponent(s.name));
+          const pd=await pr.json();
+          if(pd.error){alert(s.name+': cannot arm — '+pd.error);btn.disabled=false;return;}
+          msg+=' Will write '+pd.keys.length+' keys: '+pd.keys.join(', ')+'.';
+        }catch(e){/* preview is best-effort; the ceremony's own checks still gate the write */}
+        if(!confirm(msg+' Proceed?')){btn.disabled=false;return;}
+        await fetch('/api/arm',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({repo:s.name})});
         pollLog();
       };
       div.appendChild(btn);
@@ -732,13 +794,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif p == "/api/log":
             self._send(json.dumps({"log": CEREMONY.log, "done": CEREMONY.done,
                                    "active": CEREMONY.active}))
+        elif p == "/api/arm-preview":
+            name = q.get("repo", [None])[0]
+            if name not in ROSTER:
+                return self._send('{"error":"unknown repo"}', code=400)
+            try:
+                body = sync_signers(name, dry=True)
+            except SystemExit as exc:
+                return self._send(json.dumps({"error": str(exc)}), code=409)
+            # Just the trailing comment (key handle name) per line, never the
+            # blob — a preview shows WHICH keys, not the key material itself.
+            keys = [ln.split()[-1] for ln in body.strip().split("\n") if ln.strip()]
+            self._send(json.dumps({"keys": keys}))
         else:
             self._send('{"error":"not found"}', code=404)
 
     def do_POST(self):
         if not self._authed():
             return self._send('{"error":"unauthorized"}', code=401)
-        if urllib.parse.urlparse(self.path).path != "/api/seal":
+        path = urllib.parse.urlparse(self.path).path
+        if path not in ("/api/arm", "/api/seal"):
             return self._send('{"error":"not found"}', code=404)
         try:
             n = int(self.headers.get("Content-Length", "0"))
@@ -746,12 +821,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name = req.get("repo")
             if name not in ROSTER:
                 return self._send('{"error":"unknown repo"}', code=400)
-            key_n = req.get("key")
-            if key_n is not None and key_n not in (1, 2, 3, 4):
-                return self._send('{"error":"key must be 1-4"}', code=400)
-            threading.Thread(target=CEREMONY.seal,
-                             args=(name, bool(req.get("arm")), key_n),
-                             daemon=True).start()
+            if path == "/api/arm":
+                threading.Thread(target=CEREMONY.arm, args=(name,),
+                                 daemon=True).start()
+            else:
+                key_n = req.get("key")
+                if key_n is not None and key_n not in (1, 2, 3, 4):
+                    return self._send('{"error":"key must be 1-4"}', code=400)
+                threading.Thread(target=CEREMONY.seal, args=(name, key_n),
+                                 daemon=True).start()
             self._send('{"ok":true}')
         except RuntimeError as exc:
             self._send(json.dumps({"error": str(exc)}), code=409)
@@ -816,9 +894,9 @@ def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
         print(__doc__ or "mudra status|audit|sync-signers <repo> [--dry]|"
-              "seal <repo> [--arm]|serve [--port N]|open")
+              "arm <repo>|seal <repo>|serve [--port N]|open")
         print("mudra status [--json] [--no-remote] · audit [--remote] · "
-              "sync-signers <repo> [--dry] · seal <repo> [--arm] · "
+              "sync-signers <repo> [--dry] · arm <repo> · seal <repo> [--key N] · "
               "serve [--port N] · open [--print]")
         return
     cmd, rest = args[0], args[1:]
@@ -829,9 +907,14 @@ def main():
     elif cmd == "sync-signers":
         body = sync_signers(rest[0], dry="--dry" in rest)
         print(body if "--dry" in rest else f"{rest[0]}: anchor rebuilt ({EXPECTED_KEYS} keys)")
+    elif cmd == "arm":
+        CEREMONY.arm(rest[0])
+        for e in CEREMONY.log:
+            print(f"{e['t']}  {e['msg']}")
+        sys.exit(0 if CEREMONY.done == "armed" else 1)
     elif cmd == "seal":
         key_n = int(rest[rest.index("--key") + 1]) if "--key" in rest else None
-        CEREMONY.seal(rest[0], arm="--arm" in rest, key_n=key_n)
+        CEREMONY.seal(rest[0], key_n=key_n)
         for e in CEREMONY.log:
             print(f"{e['t']}  {e['msg']}")
         sys.exit(0 if CEREMONY.done == "sealed" else 1)

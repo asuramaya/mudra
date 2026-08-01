@@ -15,13 +15,18 @@ your graphical session — `systemctl --user status mudra` / `restart mudra` /
 `journalctl --user -u mudra` are the usual levers.
 
 Every repo renders as a card: version, tag state, anchor state (armed / inert / none),
-embedded-copy drift, working-tree dirt, and the derived verdict. Releases **AWAITING SEAL**
-carry a button. If the anchor is still inert, the button reads **ARM + SEAL** and demands an
-extra confirmation first — arming pins the master identity fail-closed *forever*, so it asks
-once, deliberately, rather than being a checkbox you can miss. The ceremony streams its steps
-into a live log; when it needs your hardware key, the desk says so plainly. After upload,
-mudra re-downloads everything and verifies hash chain + signature exactly as an end user
-would — a card only ever reads "sealed" once that's been *proven*, not just uploaded.
+embedded-copy drift, working-tree dirt, and the derived verdict. Arm and seal are separate
+acts with separate buttons, on purpose — arming needs only the public keys and has to work
+on a repo that has never been tagged; sealing needs the physical touch and a published
+release, so it can only ever follow a tag, never precede one. An **ARM** button appears on
+any repo that isn't armed yet, tag or no tag. Clicking it previews which keys are about to be
+written, then demands an extra confirmation — arming pins the master identity fail-closed
+*forever*, so it asks once, deliberately, rather than being a checkbox you can miss. A
+**SEAL** button appears once a repo is both armed and has a release **AWAITING SEAL**. The
+ceremony streams its steps into a live log; when sealing needs your hardware key, the desk
+says so plainly. After upload, mudra re-downloads everything and verifies hash chain +
+signature exactly as an end user would — a card only ever reads "sealed" once that's been
+*proven*, not just uploaded.
 
 The key-picker dropdown remembers which physical key handle N pairs with, once you've sealed
 with it successfully — see `src/bin/mudra`'s device-fingerprint ladder in
@@ -40,10 +45,13 @@ src/bin/mudra sync-signers <repo> [--dry]     # rebuild <repo>'s anchor from the
                                               # key home (rebuild-from-all, refuses on
                                               # anything but exactly 4 keys). --dry prints
                                               # the would-be anchor body without writing.
-src/bin/mudra seal <repo> [--arm] [--key N]   # the full ceremony, terminal edition. --arm
-                                              # is required the first time a repo's anchor
-                                              # is inert; --key picks which physical handle
-                                              # to sign with when auto-detection can't.
+src/bin/mudra arm <repo>                      # sync-signers, then a SCOPED commit + push,
+                                              # in one act. Works on an untagged repo — that
+                                              # is the entire point. Refuses if already armed.
+src/bin/mudra seal <repo> [--key N]           # the full ceremony, terminal edition. Refuses
+                                              # if the anchor isn't armed yet — arm first;
+                                              # --key picks which physical handle to sign
+                                              # with when auto-detection can't.
 src/bin/mudra open [--print]                  # launch the browser into a running serve's
                                               # authenticated desk; --print just prints the URL
 ```

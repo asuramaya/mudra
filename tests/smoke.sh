@@ -155,4 +155,61 @@ else
   die "fresh anchor landed at the wrong path"
 fi
 
+# ARM CEREMONY (`mudra arm <repo>`, the standalone act split out from seal):
+# writes the anchor, then a SCOPED commit, then push — needs a real git
+# remote to prove the push actually happened, not just assume it. A local
+# bare repo works fine and lets the push be verified in the remote itself.
+mkdir -p "$T/repos/fakearm/packaging"
+BARE="$T/bare-fakearm.git"
+git init -q --bare -b main "$BARE"
+( cd "$T/repos/fakearm" && git init -q -b main . \
+  && echo 0.0.1 > packaging/VERSION \
+  && git add -A && git -c user.email=s@s -c user.name=s commit -qm x \
+  && git remote add origin "$BARE" \
+  && git push -q -u origin main )
+
+ENV3="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm MUDRA_KEY_HOME=$T/keys"
+env $ENV3 "$MUDRA" arm fakearm >/dev/null 2>&1
+rc=$?
+if [ "$rc" = 0 ] \
+   && [ -s "$T/repos/fakearm/packaging/release-signing/allowed_signers" ] \
+   && git -C "$T/repos/fakearm" log -1 --format=%s | grep -q "arm release verification" \
+   && git -C "$BARE" log -1 --format=%s main | grep -q "arm release verification"; then
+  say "arm: write+commit+push ceremony ok (verified in the bare remote, not just locally)"
+else
+  die "arm ceremony didn't write+commit+push correctly (rc=$rc)"
+fi
+
+# arm refuses an already-armed repo rather than silently re-arming
+env $ENV3 "$MUDRA" arm fakearm >/dev/null 2>&1 \
+  && die "arm accepted an already-armed repo" \
+  || say "arm: refuses an already-armed repo ok"
+
+# arm must surface a CLEAN failure on a bad key count, not a raw traceback.
+# sync_signers() raises SystemExit for its own CLI entry point's sake;
+# `except Exception` does not catch that (BaseException, not Exception) —
+# the ceremony has to convert it, or this fails silently in the log instead
+# of reporting why.
+mkdir -p "$T/repos/fakearm2/packaging"
+BARE2="$T/bare-fakearm2.git"
+git init -q --bare -b main "$BARE2"
+( cd "$T/repos/fakearm2" && git init -q -b main . \
+  && echo 0.0.1 > packaging/VERSION \
+  && git add -A && git -c user.email=s@s -c user.name=s commit -qm x \
+  && git remote add origin "$BARE2" \
+  && git push -q -u origin main )
+rm -f "$T/keys/id_fake_4.pub"
+ENV4="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm2 MUDRA_KEY_HOME=$T/keys"
+out="$(env $ENV4 "$MUDRA" arm fakearm2 2>&1)"
+rc=$?
+if [ "$rc" != 0 ] && echo "$out" | grep -qi "refusing\|expected"; then
+  say "arm: SystemExit from sync_signers surfaces as a clean failure, not a crash ok"
+else
+  die "arm's SystemExit-catching didn't work: rc=$rc out=$out"
+fi
+for i in 1 2 3 4; do
+  [ -f "$T/keys/id_fake_$i.pub" ] || ssh-keygen -q -y -f "$T/keys/id_fake_$i" \
+    > "$T/keys/id_fake_$i.pub" 2>/dev/null
+done
+
 [ "$FAIL" = 0 ] && echo "SMOKE OK" || { echo "SMOKE FAILED"; exit 1; }
