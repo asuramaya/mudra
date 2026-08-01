@@ -237,3 +237,45 @@
 - docs/RELEASING.md and docs/ARCHITECTURE.md (new "Signing itself"
   section) updated to describe the real process now that one exists,
   replacing the earlier "mudra has no release.yml yet" framing.
+
+## 0.6.0 — the straddle's death, and the ninth repo it nearly hid (2026-08-01)
+
+- `_uses_packaging_layout()` / `_first_existing()` DELETED. gestalt (the
+  last holdout) converged to packaging/VERSION at fa2297a; every repo the
+  packaging/-layout rollout covers is on it now. `version_path()` /
+  `anchor_file()` / `anchor_rel()` take a single fixed `packaging/` path.
+- BUT: ordered to confirm the roster myself before deleting rather than
+  trust the convergence report (alfred, msgs 2801/2806) — made the edit,
+  diffed the FULL nine-row roster, not the eight either report measured,
+  and rotten-apple regressed from anchor=armed to anchor=none. It's a Rust
+  workspace outside REPO-STANDARD's packaging/ convergence by design (no
+  VERSION file ever, Cargo.toml carries its version instead), with a
+  genuinely armed anchor at the old root release-signing/allowed_signers —
+  and neither alfred's convergence matrix (7ec8dff0) nor his dispatch to
+  me had ever counted it, because both silently inherited his coordination
+  charter's boundary (nine repos on mudra's desk, eight in his charter).
+  REVERTED before committing rather than ship a real armed anchor into
+  invisibility.
+- Ruling 23d9e8e4 (alfred, split by ownership): mudra's read of
+  rotten-apple gets a PERMANENT, explicitly NAMED exception
+  (`_ROOT_LAYOUT_REPOS = {"rotten-apple"}`) — not a generic dual-layout
+  probe, which is what made the regression silent in the first place, by
+  asserting any repo might be on either layout. Whether rotten-apple ever
+  adopts packaging/ is Ra's and the operator's call, not mudra's.
+- FAIL LOUD, never fall back: a repo matching neither the named exception
+  nor the packaging/ layout now reads `anchor: "unrecognized-layout"` — a
+  hard `audit()` finding, never a silent `anchor: "none"` that looks
+  identical to a normal, expected not-yet-armed repo.
+- Proved the carve-out load-bearing in both directions, on the real
+  roster, not just fixtures: with `_ROOT_LAYOUT_REPOS` in place,
+  rotten-apple reads `anchor=armed`; with it removed (a throwaway patched
+  copy of the script, never the real file), the same repo reads
+  `anchor=unrecognized-layout` and `audit` fails on it. Both runs against
+  the live `~/code/rotten-apple` checkout, not a simulation.
+- tests/smoke.sh grows fixtures for all three shapes (packaging/-layout,
+  the named root-layout exception, and matching neither) plus the same
+  positive/negative proof, offline.
+- docs/ARCHITECTURE.md: replaced the delete-condition paragraph with what
+  actually happened, and named the two sets (mudra's nine-repo desk vs.
+  alfred's eight-repo coordination charter) so a successor doesn't
+  rediscover the gap by shipping the regression.

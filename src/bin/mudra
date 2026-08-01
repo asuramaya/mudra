@@ -205,41 +205,35 @@ def release_state(path, tag, no_remote=False):
 
 
 # REPO-STANDARD.md (2026-07-27) moved VERSION and release-signing/ under
-# packaging/ as part of the twelve-row root. The desk has to read both layouts:
-# repos adopt the standard one at a time, so old and new coexist for as long as
-# the rollout takes. kast went first and vanished from the queue entirely ("v?
-# anchor=none no VERSION") because these paths were hardcoded at the root —
-# the restructuring blinded the one tool whose whole job is the ceremony.
-# Root first: it is the layout most repos still have, and an unadopted repo
-# should never pay a stat for the newer path.
-def _uses_packaging_layout(path):
-    """True once a repo has moved VERSION under packaging/ — the signal a
-    fresh anchor (one that exists in NEITHER layout yet) uses to decide
-    where to be CREATED. Without this, a repo that migrated VERSION but
-    never armed before (gestalt: anchor=none today) would have sync_signers
-    recreate release-signing/ at the OLD root — reintroducing exactly the
-    root clutter the migration exists to remove, on the one file mudra
-    itself writes."""
+# packaging/. The straddle that read both layouts while the rollout was in
+# flight is GONE as of 0.6.0 — every repo REPO-STANDARD covers converged
+# 2026-08-01 (gestalt last, fa2297a). ONE repo was never in that set at all:
+# rotten-apple is a Rust workspace outside alfred's charter (Ra's house),
+# has no VERSION file ever — version comes from Cargo.toml's
+# [workspace.package] — and its anchor sits at the pre-convergence root
+# location BY DESIGN, not by lag (ruling 23d9e8e4, 2026-08-01: mudra's own
+# roster is wider than any one coordinator's charter, and that gap had
+# never been written down before it silently blinded a real armed anchor).
+# A NAMED exception, not a generic dual-layout probe: a probe asserts any
+# repo might be on either layout, which is what made that blinding silent.
+# If rotten-apple ever adopts packaging/, remove it from this set in the
+# SAME pass, or mudra goes blind in the opposite direction.
+_ROOT_LAYOUT_REPOS = {"rotten-apple"}
+
+
+def _on_packaging_layout(path):
     return os.path.exists(os.path.join(path, "packaging", "VERSION"))
 
 
-def _first_existing(path, *rels):
-    for rel in rels:
-        cand = os.path.join(path, *rel)
-        if os.path.exists(cand):
-            return cand
-    fallback = rels[-1] if len(rels) > 1 and _uses_packaging_layout(path) else rels[0]
-    return os.path.join(path, *fallback)
-
-
 def version_path(path):
-    return _first_existing(path, ("VERSION",), ("packaging", "VERSION"))
+    return os.path.join(path, "packaging", "VERSION")
 
 
 def anchor_file(path):
-    return _first_existing(path,
-                           ("release-signing", "allowed_signers"),
-                           ("packaging", "release-signing", "allowed_signers"))
+    name = os.path.basename(path.rstrip("/"))
+    if name in _ROOT_LAYOUT_REPOS:
+        return os.path.join(path, "release-signing", "allowed_signers")
+    return os.path.join(path, "packaging", "release-signing", "allowed_signers")
 
 
 def anchor_rel(path):
@@ -274,15 +268,27 @@ def repo_state(name, no_remote=False):
     rc, out, _ = run(["git", "status", "--porcelain", "-uno"], cwd=path)
     st["dirty"] = bool(out.strip()) if rc == 0 else None
 
-    anchor_path = anchor_file(path)
-    lines = anchor_lines(anchor_path)
-    if lines is None:
-        st["anchor"] = "none"
-    elif not lines:
-        st["anchor"] = "inert"
+    name_base = os.path.basename(path.rstrip("/"))
+    if name_base not in _ROOT_LAYOUT_REPOS and not _on_packaging_layout(path):
+        # Matches neither the packaging/ layout nor the named root-layout
+        # exception — a repo the desk doesn't recognize the shape of. Fail
+        # LOUDLY (a distinct, visibly-wrong value) rather than silently
+        # reading anchor=none, which would look identical to a normal,
+        # expected not-yet-armed repo — exactly the silence that let a real
+        # armed anchor go invisible on rotten-apple. audit() turns this into
+        # a hard finding; investigate rather than guess.
+        st["anchor"] = "unrecognized-layout"
+        lines = None
     else:
-        st["anchor"] = "armed"
-        st["anchor_keys"] = len(lines)
+        anchor_path = anchor_file(path)
+        lines = anchor_lines(anchor_path)
+        if lines is None:
+            st["anchor"] = "none"
+        elif not lines:
+            st["anchor"] = "inert"
+        else:
+            st["anchor"] = "armed"
+            st["anchor_keys"] = len(lines)
     emb = embedded_block(os.path.join(path, "install.sh"))
     if emb is not None:
         file_body = "\n".join(lines or [])
@@ -334,6 +340,11 @@ def audit(no_remote=True):
         n = st["name"]
         if st.get("missing"):
             findings.append((n, "repo missing from " + REPO_ROOT))
+            continue
+        if st["anchor"] == "unrecognized-layout":
+            findings.append((n, "matches neither packaging/ layout nor a named "
+                             "root-layout exception (_ROOT_LAYOUT_REPOS) — "
+                             "investigate before trusting anchor=none"))
             continue
         if st["anchor"] == "armed":
             lines = anchor_lines(anchor_file(st["path"]))

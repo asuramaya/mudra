@@ -64,27 +64,40 @@ not a pill (RELEASE.md's artifact ruling is scoped to the six pills that ship to
 has nothing an installer would package differently from the tarball. See
 [RELEASING.md](RELEASING.md) for the running order.
 
-## Reading two tree layouts during the family's own rollout
+## mudra's roster is wider than any one coordinator's charter
 
-REPO-STANDARD.md (2026-07-27) moved every pill's `VERSION` and `release-signing/` under
-`packaging/`. mudra has to read whichever layout a given repo is currently on, since the
-rollout lands one repo at a time: `version_path()` / `anchor_file()` / `anchor_rel()` check
-root first, then `packaging/`, so an unmigrated repo never pays a stat for the newer path, and
-`_uses_packaging_layout()` decides where a **first-ever** anchor gets created for a repo that
-migrated `VERSION` but never armed before — without it, that anchor would silently reappear at
-the old root, undoing the migration on the one file mudra itself writes.
+`DEFAULT_REPOS` tracks **nine** repos. REPO-STANDARD.md's `packaging/` convergence effort
+covers **eight** of them (the five pills + gestalt + sutra + mudra) — that was the full set
+alfred's own coordination charter spans (ByeByte, RAMstein, coldspot, gestalt, kast, mudra,
+phanspeed, sutra), and every measurement of "is the family converged" naturally inherited that
+boundary without anyone writing down that it existed. **rotten-apple is the ninth, and it was
+never in that set.** It's Ra's house, not alfred's: a Rust workspace with no `VERSION` file at
+all (its version lives in `Cargo.toml`'s `[workspace.package]`), and its anchor sits at the
+pre-convergence root `release-signing/allowed_signers` — genuinely armed, real keys — **by
+design, not by lag**. Unlike gestalt, there is nothing here that "converges" later; rotten-apple
+simply isn't shaped like a `packaging/`-layout repo and was never going to be.
 
-**Delete condition, exact, not vague.** As of 2026-08-01 five of the six pills (kast,
-coldspot, ByeByte, RAMstein, phanspeed) have converged to `packaging/VERSION` +
-`packaging/release-signing/`; gestalt is the only repo left on the old root layout, with no
-anchors at all yet. The straddle exists **solely for gestalt** now. Delete
-`_uses_packaging_layout()` / `_first_existing()` and simplify `version_path()` /
-`anchor_file()` / `anchor_rel()` back to a single fixed `packaging/` path the day gestalt
-either converges or leaves the roster — not one day before, since that is the one repo that
-would break. Check `mudra status` for gestalt's row before removing this.
+This mattered because a straddle that read "root, then packaging/" for every repo made the two
+sets look like one set with a rollout in progress — which was true for eight repos and false
+for the ninth, and nothing distinguished them. Ruling 23d9e8e4 (2026-08-01): a NAMED exception,
+not a generic probe. `_ROOT_LAYOUT_REPOS = {"rotten-apple"}` in `src/bin/mudra` is the one
+place this fact lives in code; `version_path()` / `anchor_file()` / `anchor_rel()` take a
+single fixed `packaging/` path for everyone not in that set. A repo matching **neither**
+shape — not the named exception, no `packaging/VERSION` either — reads `anchor:
+"unrecognized-layout"`, a value `audit()` treats as a hard finding, never a silent `anchor:
+"none"`. Silent invisibility on a real armed anchor is exactly the failure this replaced: the
+straddle's own delete condition fired cleanly for the eight (gestalt converged last, `fa2297a`,
+2026-08-01), and only got caught before shipping because the roster was diffed against the
+FULL nine rows rather than the eight in the convergence report.
+
+**If rotten-apple ever adopts `packaging/`**, remove it from `_ROOT_LAYOUT_REPOS` in the SAME
+pass that its own layout flips — leaving it in the set after that would point mudra's read at a
+directory that no longer holds the real anchor, blinding it in the opposite direction. That
+decision belongs to Ra and the operator, not to mudra.
 
 ## Standard exemptions
 
 | Item | Why |
 |---|---|
 | `install.sh` / `uninstall.sh` | mudra installs through two independent, already-idempotent make targets — `make install-launcher` (desktop entry, no root) and `make install-polkit` (system polkit action, needs root once) — not a shell installer. There is nothing a wrapper script would install differently; adding one would just be a second thing to keep in sync with the Makefile. |
+| rotten-apple's root-layout anchor | See "mudra's roster is wider than any one coordinator's charter", above — a permanent, named exception (`_ROOT_LAYOUT_REPOS`), not a temporary straddle. |
