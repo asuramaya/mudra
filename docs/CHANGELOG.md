@@ -197,3 +197,14 @@
   block, and a check-repo target (`git ls-files | cut -d/ -f1 | sort -u`,
   never a hand-maintained skip list) ordered first in ci.yml, ahead of
   `make smoke`.
+
+## 0.4.1 — the straddle's exact death condition (2026-08-01)
+
+- docs/ARCHITECTURE.md: documented precisely when `_uses_packaging_layout()`
+  / `_first_existing()` can be deleted (alfred, msg 2609, having measured
+  it): all five pills but gestalt have converged to packaging/VERSION +
+  packaging/release-signing — the straddle exists solely for gestalt now.
+  Delete it the day gestalt converges or leaves the roster, not before;
+  removing it now would break the one repo that still needs it. Code
+  unchanged — this pass only makes the trigger explicit instead of leaving
+  a future reader to guess at the code's purpose.

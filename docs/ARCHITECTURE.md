@@ -54,6 +54,15 @@ root first, then `packaging/`, so an unmigrated repo never pays a stat for the n
 migrated `VERSION` but never armed before — without it, that anchor would silently reappear at
 the old root, undoing the migration on the one file mudra itself writes.
 
+**Delete condition, exact, not vague.** As of 2026-08-01 five of the six pills (kast,
+coldspot, ByeByte, RAMstein, phanspeed) have converged to `packaging/VERSION` +
+`packaging/release-signing/`; gestalt is the only repo left on the old root layout, with no
+anchors at all yet. The straddle exists **solely for gestalt** now. Delete
+`_uses_packaging_layout()` / `_first_existing()` and simplify `version_path()` /
+`anchor_file()` / `anchor_rel()` back to a single fixed `packaging/` path the day gestalt
+either converges or leaves the roster — not one day before, since that is the one repo that
+would break. Check `mudra status` for gestalt's row before removing this.
+
 ## Standard exemptions
 
 | Item | Why |
