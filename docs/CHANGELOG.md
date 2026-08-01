@@ -317,4 +317,10 @@ The highlights, oldest to newest:
 
 Also in this release: a documentation note on a testing constraint found proving that
 exception load-bearing — a copy of `src/bin/mudra` only runs from inside a real, repo-shaped
-checkout, since it reads its own version from `packaging/VERSION` at import time.
+checkout, since it reads its own version from `packaging/VERSION` at import time — and a fix
+to `docs/RELEASING.md`'s own arming order, found before it could ship a first tagged tarball
+with a permanently empty anchor (arm must happen before the tag, never bundled into the seal
+step afterward). That fix is now enforced in `release.yml` itself, not just documented: a CI
+step refuses to build the release tarball if `packaging/release-signing/allowed_signers` is
+empty at tag time, ported from gestalt hitting the identical drafting mistake independently
+and adding the guard rather than just the prose fix.
