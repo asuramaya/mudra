@@ -280,13 +280,41 @@
   alfred's eight-repo coordination charter) so a successor doesn't
   rediscover the gap by shipping the regression.
 
-## 0.6.1 — write down what the negative control found (2026-08-01)
+## 0.6.1 — mudra's first release (2026-08-01)
 
-- docs/ARCHITECTURE.md: a copy of src/bin/mudra only runs sitting inside a
-  real, repo-shaped checkout — MUDRA_VERSION reads packaging/VERSION at
-  import time via _self_path, which needs three real directories above
-  it. A scratch copy in an unrelated temp dir crashes before reaching
-  whatever it was meant to test, as 0.6.0's negative control hit directly.
-  Alfred's framing (msg 2846): this costs an hour to rediscover and a
-  minute to write down — it's a live constraint on any future out-of-tree
-  harness around the desk, not just a note about one test.
+mudra is the pill family's release-seal desk. Every release ships from CI unsigned, plus a
+`SHA256SUMS` manifest; mudra derives a queue from that reality — a published release with no
+`.sig` IS the "awaiting seal" entry, an empty `allowed_signers` IS the unarmed state, nothing
+stored, nothing to drift — and gives the operator one desk (CLI or a loopback-only GUI) to
+clear it: arm an anchor, sign a manifest with a physical FIDO2 key, verify the result back
+exactly as an end user would. mudra never holds key material. Signing shells to `ssh-keygen -Y`
+against hardware the private half never leaves; the one act mudra cannot and will not do on its
+own is the touch. That is the operator's hand, by design.
+
+This is mudra's first tagged release, after real development that never stopped to cut one.
+The highlights, oldest to newest:
+
+- **The desk itself** (0.1.0–0.3.3): the CLI+GUI ceremony end to end — arm, seal, verify-back —
+  physical-key auto-detection, a one-boot session token, and the scoped arming commit (never
+  `git add -A`, learned from a real incident that swept unrelated files into a public repo).
+- **Its own first CI** (0.3.10): `make smoke` on every push. The test suite had already covered
+  the dangerous paths — sync-signers rebuild, the 3-key refusal, audit catching divergence —
+  for months; nothing had ever run it on a commit before this.
+- **The REPO-STANDARD tree fold** (0.4.0): the same twelve-row convergence every pill adopted,
+  applied to mudra itself, plus fixing two self-referential bugs the move would otherwise have
+  introduced silently — a path-resolution depth error and a hand-duplicated version constant.
+- **Its own release machinery** (0.5.0): the anchor, `sync-signers.sh`, `release.yml`,
+  `signing-sync.yml` — built with everything shipped empty and nothing armed, so mudra could
+  finally do for itself what it does for every other repo in the family.
+- **The straddle's death, and the ninth repo it nearly hid** (0.6.0): once every REPO-STANDARD
+  repo had converged, the two-layout compatibility code came out — and doing that safely
+  surfaced that mudra's own roster is wider than any one coordinator's charter. One repo,
+  outside that convergence entirely, had a genuinely armed anchor at a different, permanent
+  location; catching it before shipping (by checking the full roster rather than trusting a
+  report) is why that anchor is still visible today instead of silently gone dark. Fixed with a
+  named, permanent exception and a rule that anything unrecognized fails loud, never quietly
+  reads as "nothing to see here."
+
+Also in this release: a documentation note on a testing constraint found proving that
+exception load-bearing — a copy of `src/bin/mudra` only runs from inside a real, repo-shaped
+checkout, since it reads its own version from `packaging/VERSION` at import time.
