@@ -95,6 +95,14 @@ pass that its own layout flips — leaving it in the set after that would point 
 directory that no longer holds the real anchor, blinding it in the opposite direction. That
 decision belongs to Ra and the operator, not to mudra.
 
+**A live constraint on testing mudra out-of-tree, found building this fix's negative control:**
+`src/bin/mudra` resolves its own version from `packaging/VERSION` at import time, via
+`_self_path` (three directories up from `__file__` — see "No stored state, by design", above).
+That means a copy of the script only works sitting inside a real, repo-shaped checkout; drop it
+somewhere else — an unrelated scratch directory, a `mktemp -d` — and it crashes before reaching
+whatever you meant to test. Any future harness that patches or forks the script has to drop the
+copy BESIDE the real file (never as it), not off in a temp dir.
+
 ## Standard exemptions
 
 | Item | Why |

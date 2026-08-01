@@ -279,3 +279,14 @@
   actually happened, and named the two sets (mudra's nine-repo desk vs.
   alfred's eight-repo coordination charter) so a successor doesn't
   rediscover the gap by shipping the regression.
+
+## 0.6.1 — write down what the negative control found (2026-08-01)
+
+- docs/ARCHITECTURE.md: a copy of src/bin/mudra only runs sitting inside a
+  real, repo-shaped checkout — MUDRA_VERSION reads packaging/VERSION at
+  import time via _self_path, which needs three real directories above
+  it. A scratch copy in an unrelated temp dir crashes before reaching
+  whatever it was meant to test, as 0.6.0's negative control hit directly.
+  Alfred's framing (msg 2846): this costs an hour to rediscover and a
+  minute to write down — it's a live constraint on any future out-of-tree
+  harness around the desk, not just a note about one test.
