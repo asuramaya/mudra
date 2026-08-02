@@ -28,6 +28,12 @@ machine with a real hardware key plugged in (this one, as it turned out, mid-dev
 would otherwise have silently mapped that real device to a test fixture's throwaway slot
 in the operator's actual `~/.config/mudra/keymap.json`.
 
+Fixed before this ever ran for real: `keysetup`'s generation used a single shared
+`application=ssh:mudra` for every slot. The real 4 keys already in `~/.ssh/asuramaya-master/`
+each carry their own per-slot RP ID (`ssh:asuramaya-master-N`, visible in a hardware key's
+own credential manager, not just mudra's view of it) — caught by comparing the two before
+`keysetup` was ever used to mint anything. Now matches: `application=ssh:asuramaya-master-{slot}`.
+
 ## 0.1.0 — the seal desk opens (2026-07-19)
 
 - Derived-from-reality release queue: published-release-without-.sig IS the

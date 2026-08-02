@@ -677,8 +677,8 @@ class Ceremony:
                 if os.path.exists(f):
                     os.remove(f)
             rc, out, err = run(["ssh-keygen", "-t", "ed25519-sk", "-O", "resident",
-                               "-O", "application=ssh:mudra", "-N", "",
-                               "-C", f"asuramaya-master-{slot}", "-f", priv],
+                               "-O", f"application=ssh:asuramaya-master-{slot}",
+                               "-N", "", "-C", f"asuramaya-master-{slot}", "-f", priv],
                                timeout=120, env=env)
             if rc:
                 raise RuntimeError(f"generation failed: {err or out}")
