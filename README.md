@@ -65,7 +65,10 @@ onto that slot (PIN, then TOUCH). mudra still never holds key material here eith
 Regenerating an OCCUPIED slot is a distinct, scarier confirmation — it permanently
 retires whatever was there, and every anchor already armed with its public half needs
 re-arming family-wide. Manual mapping (registering the plugged-in device as handle N
-without generating anything) is CLI-only — `keysetup --map N`.
+without generating anything) is CLI-only — `keysetup --map N`. The panel polls live
+while open (2s) so swapping physical keys shows up without reopening it; a device
+that's detected but not yet mapped to any slot shows its raw fingerprint so "is this
+even seeing my key" has a direct answer.
 
 ## The CLI (same verbs, no browser)
 

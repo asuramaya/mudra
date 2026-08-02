@@ -37,6 +37,20 @@ each carry their own per-slot RP ID (`ssh:asuramaya-master-N`, visible in a hard
 own credential manager, not just mudra's view of it) — caught by comparing the two before
 `keysetup` was ever used to mint anything. Now matches: `application=ssh:asuramaya-master-{slot}`.
 
+The wizard panel didn't live-update: it fetched `/api/keysetup/status` once, on open, and again
+only after a ceremony finished — swap physical keys while it's sitting open and nothing moved,
+which reads exactly like broken detection even though `device_fingerprint()` itself was correct
+and current the whole time (confirmed directly against `ykman list --serials` mid-investigation).
+Now polls every 2s while open (a diff-guard skips the re-render when nothing actually changed, so
+it doesn't flicker), and the fingerprint cache dropped from 10s to 3s to match. Along the way,
+found the other half of "why didn't it respond": only 2 of the 4 real keys had ever been mapped
+in `keymap.json` at all (slots 1 and 4 — 2 and 3 never had a seal or a manual `--map` register
+them) — swapping to an unmapped key was always going to show nothing next to any slot, no matter
+how fast the polling is, since there's no slot to attribute it to. Not a bug, but indistinguishable
+from one without feedback: the panel now shows a **connected, not mapped to a slot: `<fingerprint>`**
+note whenever a device is detected but unregistered, so "is this thing even seeing my key" has a
+direct answer instead of just silence.
+
 ## 0.1.0 — the seal desk opens (2026-07-19)
 
 - Derived-from-reality release queue: published-release-without-.sig IS the

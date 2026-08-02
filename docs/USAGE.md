@@ -48,6 +48,11 @@ there, and every anchor already armed with its old public half needs re-arming,
 family-wide. Manual mapping — writing the "handle N" assignment for whatever's plugged
 in right now, no generation, no touch — is CLI-only: `keysetup --map N`.
 
+The panel polls every 2s while it's open, so physically swapping keys shows up without
+closing and reopening it. If a connected device isn't mapped to any slot yet, the panel
+shows its raw fingerprint (**connected, not mapped to a slot: ...**) rather than staying
+silent — that state means "register it" (`keysetup --map N`), not "detection is broken".
+
 ## The CLI (same verbs, no browser)
 
 ```sh

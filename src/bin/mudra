@@ -78,7 +78,7 @@ _FP_CACHE = {"t": 0.0, "fp": None}
 def device_fingerprint():
     """Fingerprint the ONE connected FIDO key, or None if 0/many/unknown."""
     now = time.time()
-    if now - _FP_CACHE["t"] < 10:
+    if now - _FP_CACHE["t"] < 3:
         return _FP_CACHE["fp"]
     fp = None
     rc, out, _ = run(["ykman", "list", "--serials"], timeout=10)
@@ -782,11 +782,23 @@ function paintKeysel(detected){
 }
 const keysBtn=document.getElementById('keysBtn');
 const keypanel=document.getElementById('keypanel');
+let keysPollTimer=null, lastKeysJSON=null;
 keysBtn.onclick=async()=>{
   const opening=keypanel.style.display==='none';
   keypanel.style.display=opening?'block':'none';
   keysBtn.textContent=opening?'hide keys':'manage keys';
-  if(opening) await refreshKeys();
+  if(opening){
+    lastKeysJSON=null;
+    await refreshKeys();
+    // Polls fast enough to feel live while you're physically swapping keys
+    // in front of the screen — the panel used to only ever fetch once, on
+    // open, so a swap just sat there looking unchanged until you closed
+    // and reopened it.
+    keysPollTimer=setInterval(refreshKeys, 2000);
+  } else if(keysPollTimer){
+    clearInterval(keysPollTimer);
+    keysPollTimer=null;
+  }
 };
 function trimFp(fp){
   // drop the bit-length and the trailing comment — the comment already
@@ -796,10 +808,21 @@ function trimFp(fp){
 }
 async function refreshKeys(){
   const r=await fetch('/api/keysetup/status'); const st=await r.json();
+  const json=JSON.stringify(st);
+  if(json===lastKeysJSON) return;   // nothing changed since the last poll — skip the flicker
+  lastKeysJSON=json;
   let html=`<div class="card"><b>key home</b>`+
     chip(st.key_home_exists?'found':'missing — first setup will create it',
          st.key_home_exists?'dimc':'warn')+
-    `<span class="fp">${st.key_home}</span></div>`;
+    `<span class="fp">${st.key_home}</span>`;
+  // A device CAN be detected without being mapped to any slot yet — that's
+  // not a detection failure, just nothing to attribute it to (keysetup
+  // --map N on the CLI fixes it). Surface the raw fingerprint here so
+  // "swapped keys and nothing lit up" reads as "not yet registered", not
+  // as "is detection even working".
+  if(st.detected_fp && st.mapped_slot==null)
+    html+=chip('connected, not mapped to a slot: '+st.detected_fp,'warn');
+  html+=`</div>`;
   for(const s of st.slots){
     // "plugged in now" is read-only status — the GUI doesn't offer a manual
     // map action per slot; showing it on every OTHER slot as a correction
