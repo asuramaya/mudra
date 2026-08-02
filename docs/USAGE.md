@@ -34,6 +34,19 @@ whole desk. It remembers which physical key handle N pairs with, once you've sea
 successfully — see `src/bin/mudra`'s device-fingerprint ladder in
 [ARCHITECTURE.md](ARCHITECTURE.md) if you're curious how.
 
+**manage keys**, next to the picker, opens the wizard for the 4 canonical handles
+themselves — the desk's rarest, highest-stakes act, one notch above sealing. Each of the
+4 slots shows empty or a fingerprint, and two buttons: **this is the plugged-in key**
+just writes the mapping for whatever's connected right now (no generation, no touch —
+the manual version of what a successful seal learns on its own), and
+**GENERATE**/**REGENERATE** mints a brand-new hardware-backed key straight into that
+slot (PIN dialog, then TOUCH). `-O resident` keeps mudra's own rule intact even here:
+the private half never leaves the token, only its public half and a local handle stub
+(useless without the physical key present) ever touch disk. Regenerating an OCCUPIED
+slot asks a distinctly scarier confirmation than an empty one — it permanently retires
+whatever device was registered there, and every anchor already armed with its old
+public half needs re-arming, family-wide.
+
 ## The CLI (same verbs, no browser)
 
 ```sh
@@ -54,6 +67,13 @@ src/bin/mudra seal <repo> [--key N]           # the full ceremony, terminal edit
                                               # if the anchor isn't armed yet — arm first;
                                               # --key picks which physical handle to sign
                                               # with when auto-detection can't.
+src/bin/mudra keysetup                        # the 4 handles at a glance: which are
+                                              # filled, which device is plugged in and
+                                              # what it's mapped to
+src/bin/mudra keysetup --slot N [--force]     # mint a new hardware key into slot N;
+                                              # refuses an occupied slot without --force
+src/bin/mudra keysetup --map N                # register the plugged-in device as slot N,
+                                              # no generation, no touch
 src/bin/mudra open [--print]                  # launch the browser into a running serve's
                                               # authenticated desk; --print just prints the URL
 ```
@@ -71,6 +91,7 @@ longer matches its anchor file.
 | `MUDRA_REPOS` | the nine tracked repos | comma-separated roster override |
 | `MUDRA_KEY_HOME` | `~/.ssh/asuramaya-master` | canonical key home (ruling 13ee52ce) |
 | `MUDRA_SIGN_KEY` | `…/id_asuramaya_master_1` | which handle to sign with, absent `--key` |
+| `MUDRA_KEYMAP_PATH` | `~/.config/mudra/keymap.json` | device-fingerprint → handle map |
 | `MUDRA_PORT` | `7770` | desk port, 127.0.0.1 only, no override reaches beyond loopback |
 
 ## Troubleshooting
@@ -92,3 +113,8 @@ fail cleanly, never sign with the wrong identity.
 **polkit falls back to token-only with a stderr warning** — `make install-polkit` hasn't run
 yet (needs root, once). Expected on a fresh checkout; see
 [src/polkit/README.md](../src/polkit/README.md).
+
+**"slot N already has a key — this refuses without force"** from `keysetup` — that's the
+guard, not a bug. Regenerating an occupied slot permanently retires whatever device is
+registered there; pass `--force` (or confirm the REGENERATE dialog in the GUI) only once
+you mean it.

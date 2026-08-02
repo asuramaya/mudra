@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.0 — the key setup wizard (2026-08-02)
+
+The desk's rarest, highest-stakes act finally has a facilitator: `keysetup`, a wizard for
+the 4 canonical handles themselves, one notch above sealing. Two acts, per slot:
+**this is the plugged-in key** just registers whichever device is connected right now as
+handle N — no generation, no touch, the manual version of the mapping a successful seal
+already learns on its own — and **GENERATE**/**REGENERATE** mints a brand-new
+hardware-backed key straight onto a slot via `ssh-keygen -t ed25519-sk -O resident` (PIN
+dialog, then TOUCH). mudra's own rule holds even here: `-O resident` keeps the private
+half on the token, non-extractable; only the public half and a local handle stub (useless
+without the physical key present) ever touch disk. Regenerating an OCCUPIED slot asks a
+distinctly scarier question than an empty one — it permanently retires whatever device was
+registered there, and every anchor already armed with its old public half needs re-arming,
+family-wide, so it refuses outright without an explicit `force` (CLI) or extra confirmation
+(GUI). Reachable from the CLI (`keysetup`, `keysetup --slot N [--force]`,
+`keysetup --map N`) and from the desk's header (**manage keys**, next to the key picker).
+Ceremony.keysetup shares the same single-flight lock as arm and seal — it's the third act
+writing into shared state (the key home this time, not a repo), not a fourth exception to
+the rule.
+
+Also in this release: `MUDRA_KEYMAP_PATH` joins the rest of mudra's env overrides
+(`MUDRA_KEY_HOME`, `MUDRA_REPO_ROOT`, ...) — found necessary while writing this feature's
+own smoke coverage, since `keysetup`/`seal` are the only code paths that ever call
+`learn_key()`, and until now nothing sandboxed where that write landed. A smoke run on any
+machine with a real hardware key plugged in (this one, as it turned out, mid-development)
+would otherwise have silently mapped that real device to a test fixture's throwaway slot
+in the operator's actual `~/.config/mudra/keymap.json`.
+
 ## 0.1.0 — the seal desk opens (2026-07-19)
 
 - Derived-from-reality release queue: published-release-without-.sig IS the

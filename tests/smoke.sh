@@ -220,4 +220,91 @@ for i in 1 2 3 4; do
     > "$T/keys/id_fake_$i.pub" 2>/dev/null
 done
 
+# KEY SETUP WIZARD: keysetup's own scan (id_asuramaya_master_N — a fixed
+# family naming convention, unrelated to whatever names sit in a MUDRA_KEY_HOME
+# used for arming/sealing above) needs its own, separate, initially-empty
+# key home.
+mkdir -p "$T/bin"
+REAL_SSH_KEYGEN="$(command -v ssh-keygen)"
+# Real hardware (-t ed25519-sk) can't exist in a sandbox and can't be
+# touched by anything but the operator's own hand — this test double
+# substitutes a plain ed25519 key for that ONE invocation shape (dropping
+# the sk-only -O flags a non-hardware key type would reject) and passes
+# every other call (fingerprint listing, etc.) straight through to the
+# real ssh-keygen untouched, so the wizard's own plumbing — arg
+# construction, the refuse-without-force guard, success/failure handling —
+# is exercised without ever pretending to prove real FIDO2 generation works.
+cat > "$T/bin/ssh-keygen" <<SHIM
+#!/usr/bin/env python3
+import subprocess, sys
+args = sys.argv[1:]
+if "-t" in args and args[args.index("-t") + 1] == "ed25519-sk":
+    out, skip = [], 0
+    for a in args:
+        if skip: skip -= 1; continue
+        if a == "-t": out += ["-t", "ed25519"]; skip = 1; continue
+        if a == "-O": skip = 1; continue
+        out.append(a)
+    sys.exit(subprocess.call(["$REAL_SSH_KEYGEN"] + out))
+sys.exit(subprocess.call(["$REAL_SSH_KEYGEN"] + args))
+SHIM
+chmod +x "$T/bin/ssh-keygen"
+
+# MUDRA_KEYMAP_PATH keeps device-fingerprint learning off the real
+# ~/.config/mudra/keymap.json: this is the first path through smoke.sh that
+# ever calls learn_key() (arm/sync-signers never touch it), and on any
+# machine with a real hardware key plugged in, an unsandboxed run would
+# silently map that real device to this test's throwaway slot.
+ENV5="MUDRA_KEY_HOME=$T/keys3 MUDRA_KEYMAP_PATH=$T/keymap.json PATH=$T/bin:$PATH"
+
+# fresh key home: not on disk yet, every slot reads empty rather than erroring
+out="$(env $ENV5 "$MUDRA" keysetup 2>&1)"
+echo "$out" | grep -q "MISSING" && [ "$(echo "$out" | grep -c 'slot .: empty')" = 4 ] \
+  && say "keysetup: fresh key home reads all 4 slots empty ok" \
+  || die "keysetup status on a fresh key home: $out"
+
+# generate into an empty slot
+out="$(env $ENV5 "$MUDRA" keysetup --slot 1 2>&1)"
+rc=$?
+if [ "$rc" = 0 ] && [ -s "$T/keys3/id_asuramaya_master_1.pub" ] \
+   && [ -e "$T/keys3/id_asuramaya_master_1" ]; then
+  say "keysetup: generates a fresh slot ok"
+else
+  die "keysetup --slot 1 didn't provision (rc=$rc): $out"
+fi
+
+# refuses to clobber an occupied slot without --force
+out="$(env $ENV5 "$MUDRA" keysetup --slot 1 2>&1)"
+rc=$?
+if [ "$rc" != 0 ] && echo "$out" | grep -qi "already has a key"; then
+  say "keysetup: refuses an occupied slot without --force ok"
+else
+  die "keysetup didn't refuse to clobber an occupied slot (rc=$rc): $out"
+fi
+
+# --force replaces it cleanly
+env $ENV5 "$MUDRA" keysetup --slot 1 --force >/dev/null 2>&1 \
+  && say "keysetup: --force replaces an occupied slot ok" \
+  || die "keysetup --force did not succeed on an occupied slot"
+
+# --map: either registers whatever device is plugged in, or refuses
+# cleanly if none is — never a raw traceback either way. Whether a real
+# hardware key happens to be plugged into the machine running this test is
+# environment-dependent (CI never has one; a dev box sometimes does), so
+# this checks the behavior that matches whichever state is actually true
+# rather than assuming one.
+out="$(env $ENV5 "$MUDRA" keysetup --map 2 2>&1)"
+rc=$?
+if echo "$out" | grep -q "Traceback"; then
+  die "keysetup --map crashed instead of a clean result: $out"
+elif [ "$rc" = 0 ]; then
+  echo "$out" | grep -q "^slot 2 <- " \
+    && say "keysetup: --map registers the currently-detected device ok" \
+    || die "keysetup --map exited 0 but printed something unexpected: $out"
+else
+  echo "$out" | grep -qi "no single connected key" \
+    && say "keysetup: --map with no device connected fails clean ok" \
+    || die "keysetup --map failed for the wrong reason: $out"
+fi
+
 [ "$FAIL" = 0 ] && echo "SMOKE OK" || { echo "SMOKE FAILED"; exit 1; }

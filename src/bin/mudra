@@ -60,7 +60,8 @@ REPOS = list(ROSTER)
 PORT = int(os.environ.get("MUDRA_PORT", "7770"))
 SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya_master_1"))
 EXPECTED_KEYS = 4
-KEYMAP_PATH = os.path.join(HOME, ".config", "mudra", "keymap.json")
+KEYMAP_PATH = os.environ.get("MUDRA_KEYMAP_PATH",
+                             os.path.join(HOME, ".config", "mudra", "keymap.json"))
 POLKIT_ACTION = "com.asuramaya.mudra.open-desk"
 SESSION_PATH = os.path.join(HOME, ".config", "mudra", "session.json")
 
@@ -112,6 +113,46 @@ def learn_key(fp, n):
 def detected_key():
     fp = device_fingerprint()
     return load_keymap().get(fp) if fp else None
+
+
+def keyslot_status():
+    """The wizard's whole picture in one call: which of the EXPECTED_KEYS
+    handles already have a public half on disk, and whether the physical
+    key plugged in right now is already mapped to one of them."""
+    fp = device_fingerprint()
+    mapped_slot = load_keymap().get(fp) if fp else None
+    slots = []
+    for n in range(1, EXPECTED_KEYS + 1):
+        pub_path = os.path.join(KEY_HOME, f"id_asuramaya_master_{n}.pub")
+        try:
+            with open(pub_path) as f:
+                line = f.read().strip()
+        except OSError:
+            line = None
+        slot = {"slot": n, "present": bool(line)}
+        if line:
+            parts = line.split()
+            slot["comment"] = parts[2] if len(parts) > 2 else None
+            rc, out, _ = run(["ssh-keygen", "-l", "-f", pub_path])
+            slot["fingerprint"] = out.strip() if rc == 0 else None
+        slots.append(slot)
+    return {"key_home": KEY_HOME, "key_home_exists": os.path.isdir(KEY_HOME),
+            "slots": slots, "detected_fp": fp, "mapped_slot": mapped_slot}
+
+
+def keymap_register(slot):
+    """The low-risk half of the wizard: 'the key plugged in right now IS
+    handle N' — writes the mapping a successful seal would have learned on
+    its own, without waiting for one. No generation, no touch, no lock;
+    it only ever writes keymap.json."""
+    if slot not in range(1, EXPECTED_KEYS + 1):
+        raise RuntimeError(f"slot must be 1..{EXPECTED_KEYS}")
+    fp = device_fingerprint()
+    if not fp:
+        raise RuntimeError("no single connected key detected — plug in exactly "
+                           "one key and retry")
+    learn_key(fp, slot)
+    return fp
 
 
 def run(cmd, cwd=None, timeout=120, input_=None, env=None):
@@ -407,18 +448,35 @@ def sync_signers(name, dry=False):
 
 # ---------------------------------------------------------------- ceremony
 
+def _pin_env(tmp, title):
+    """SSH_ASKPASS plumbing shared by every ceremony that needs a FIDO2 PIN
+    (sign, generate): mudra's subprocess has no usable TTY (that fight is
+    exactly what broke ceremony #1), so the PIN has to arrive via a GUI
+    dialog, never the serve terminal. None if zenity isn't installed —
+    callers fall back to a serve-terminal prompt."""
+    if not shutil.which("zenity"):
+        return None
+    askpass = os.path.join(tmp, "askpass.sh")
+    with open(askpass, "w") as f:
+        f.write(f"#!/bin/sh\nexec zenity --password --title='{title}'\n")
+    os.chmod(askpass, 0o700)
+    return {"SSH_ASKPASS": askpass, "SSH_ASKPASS_REQUIRE": "force"}
+
+
 class Ceremony:
-    """One ceremony at a time (arm or seal, any repo); steps stream into a
-    log the GUI polls. Arm and seal are two SEPARATE acts, deliberately: arm
-    needs only the public keys and must work on a repo with no tag at all;
-    seal needs the operator's physical touch and a published release. A
-    single shared lock still serializes them — arm writes the same anchor
-    file a concurrent seal might be reading mid-ceremony for that repo."""
+    """One ceremony at a time (arm, seal, or key setup, any repo or slot);
+    steps stream into a log the GUI polls. Arm and seal are two SEPARATE
+    acts, deliberately: arm needs only the public keys and must work on a
+    repo with no tag at all; seal needs the operator's physical touch and a
+    published release. Key setup is a third, rarer act — minting or
+    replacing a slot's hardware-backed identity — sharing the same lock
+    because it writes into KEY_HOME an in-flight arm's sync_signers() call
+    might be reading from concurrently."""
     def __init__(self):
         self.lock = threading.Lock()
         self.log = []
-        self.active = None    # repo name while running
-        self.done = None      # "armed" | "sealed" | "failed"
+        self.active = None    # repo name (or "key setup: slot N") while running
+        self.done = None      # "armed" | "sealed" | "provisioned" | "failed"
 
     def say(self, msg):
         self.log.append({"t": time.strftime("%H:%M:%S"), "msg": msg})
@@ -521,17 +579,8 @@ class Ceremony:
             if rc:
                 raise RuntimeError(f"download failed: {err}")
             mpath = os.path.join(tmp, manifest)
-            # The FIDO2 PIN must arrive via a GUI askpass, never a terminal:
-            # mudra's subprocess has no usable TTY (that fight is exactly what
-            # broke ceremony #1). zenity pops a native dialog over the desk.
-            env = None
-            if shutil.which("zenity"):
-                askpass = os.path.join(tmp, "askpass.sh")
-                with open(askpass, "w") as f:
-                    f.write("#!/bin/sh\nexec zenity --password "
-                            "--title='mudra — FIDO2 PIN for the seal'\n")
-                os.chmod(askpass, 0o700)
-                env = {"SSH_ASKPASS": askpass, "SSH_ASKPASS_REQUIRE": "force"}
+            env = _pin_env(tmp, "mudra — FIDO2 PIN for the seal")
+            if env:
                 self.say("signing — PIN dialog will pop, then TOUCH YOUR KEY")
             else:
                 self.say("zenity missing — PIN falls back to the serve terminal; "
@@ -585,6 +634,72 @@ class Ceremony:
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def keysetup(self, slot, force=False):
+        self._begin(f"key setup: slot {slot}")
+        try:
+            self._keysetup(slot, force)
+            self.done = "provisioned"
+        except Exception as exc:
+            self.say(f"FAILED: {exc}")
+            self.done = "failed"
+        finally:
+            self.active = None
+
+    def _keysetup(self, slot, force=False):
+        """Mint a brand-new hardware-backed master key into an empty slot —
+        or, with force, replace an occupied one. mudra still never holds key
+        material: -O resident means the private half exists only on the
+        token itself, this only ever writes the public half plus a local
+        handle stub that is useless without the physical key present and
+        touched. Shares Ceremony's lock with arm/seal — it writes into
+        KEY_HOME, which an in-flight arm's sync_signers() reads from."""
+        if slot not in range(1, EXPECTED_KEYS + 1):
+            raise RuntimeError(f"slot must be 1..{EXPECTED_KEYS}")
+        os.makedirs(KEY_HOME, exist_ok=True)
+        priv = os.path.join(KEY_HOME, f"id_asuramaya_master_{slot}")
+        pub = priv + ".pub"
+        if os.path.exists(pub) and not force:
+            raise RuntimeError(f"slot {slot} already has a key — this refuses "
+                               "without force (replacing it permanently retires "
+                               "whatever device is registered there; every "
+                               "anchor already armed with its public half needs "
+                               "re-arming family-wide)")
+        tmp = tempfile.mkdtemp(prefix="mudra-keysetup-")
+        try:
+            env = _pin_env(tmp, "mudra — FIDO2 PIN for key setup")
+            if env:
+                self.say("PIN dialog will pop if the token asks for one, "
+                         "then TOUCH YOUR KEY NOW")
+            else:
+                self.say("zenity missing — PIN falls back to the serve terminal; "
+                         "TOUCH YOUR KEY NOW")
+            for f in (priv, pub):
+                if os.path.exists(f):
+                    os.remove(f)
+            rc, out, err = run(["ssh-keygen", "-t", "ed25519-sk", "-O", "resident",
+                               "-O", "application=ssh:mudra", "-N", "",
+                               "-C", f"asuramaya-master-{slot}", "-f", priv],
+                               timeout=120, env=env)
+            if rc:
+                raise RuntimeError(f"generation failed: {err or out}")
+            try:
+                with open(pub) as f:
+                    line = f.read().strip()
+            except OSError:
+                line = ""
+            if not line:
+                raise RuntimeError("generation reported success but wrote no public key")
+            self.say(f"slot {slot} provisioned: {line.split()[0]} "
+                     f"{line.split()[-1] if len(line.split()) > 2 else ''}".strip())
+            fp = device_fingerprint()
+            if fp:
+                learn_key(fp, slot)
+                self.say(f"learned: connected device ({fp}) = slot {slot}")
+            self.say("this only fills the slot — nothing is armed yet; "
+                     "arm each repo once all slots are the keys you want")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 CEREMONY = Ceremony()
 
@@ -614,6 +729,11 @@ h1 small { color:var(--dim); font-weight:400; font-size:.55em; margin-left:.8em;
 button { background:var(--accent); color:#1b1d1a; border:0; border-radius:10px;
          padding:.45em 1.1em; font-weight:600; cursor:pointer; margin-left:auto; }
 button:disabled { background:#555; color:#999; cursor:default; }
+button.ghost { background:transparent; color:var(--dim); border:1px solid #555;
+               font-weight:400; padding:.3em .8em; font-size:.85em; margin-left:0; }
+button.ghost:disabled { border-color:#3a3a3a; }
+#keypanel .card b { min-width:5em; }
+#keypanel .fp { color:var(--dim); font-size:.8em; font-family:monospace; }
 select { background:#333; color:var(--fg); border:1px solid #555;
          border-radius:999px; padding:.15em .5em; font-size:.9em; }
 select.det { background:color-mix(in srgb,var(--good) 25%,transparent);
@@ -635,8 +755,10 @@ footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
       <option value="3">Key 3</option>
       <option value="4">Key 4</option>
     </select>
+    <button id="keysBtn" class="ghost">manage keys</button>
   </div>
 </div>
+<div id="keypanel" style="display:none"></div>
 <div id="touch">TOUCH YOUR KEY NOW</div>
 <div id="repos">scanning releases…</div>
 <pre id="log"></pre>
@@ -654,6 +776,65 @@ function paintKeysel(detected){
   keysel.className=detected?'det':'';
   keysel.title=detected?('key '+detected+' detected on USB')
                        :'no key detected — pick the one that is plugged in';
+}
+const keysBtn=document.getElementById('keysBtn');
+const keypanel=document.getElementById('keypanel');
+keysBtn.onclick=async()=>{
+  const opening=keypanel.style.display==='none';
+  keypanel.style.display=opening?'block':'none';
+  keysBtn.textContent=opening?'hide keys':'manage keys';
+  if(opening) await refreshKeys();
+};
+async function refreshKeys(){
+  const r=await fetch('/api/keysetup/status'); const st=await r.json();
+  let html=`<div class="card"><b>key home</b>`+
+    chip(st.key_home_exists?'found':'missing — first setup will create it',
+         st.key_home_exists?'dimc':'warn')+
+    `<span class="fp">${st.key_home}</span></div>`;
+  for(const s of st.slots){
+    const pluggedIn=st.detected_fp && st.mapped_slot===s.slot;
+    html+=`<div class="card">`;
+    html+=`<b>slot ${s.slot}</b>`;
+    html+=s.present?chip(s.comment||'set','ok'):chip('empty','dimc');
+    if(s.fingerprint) html+=`<span class="fp">${s.fingerprint}</span>`;
+    if(pluggedIn) html+=chip('plugged in now','ok');
+    html+=`<button data-act="map" data-slot="${s.slot}" class="ghost"`+
+          (st.detected_fp&&s.present?'':' disabled')+
+          `>this is the plugged-in key</button>`;
+    html+=`<button data-act="gen" data-slot="${s.slot}">`+
+          (s.present?'REGENERATE':'GENERATE')+`</button>`;
+    html+=`</div>`;
+  }
+  keypanel.innerHTML=html;
+  keypanel.querySelectorAll('button[data-act="map"]').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    const r=await fetch('/api/keysetup/map',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({slot:parseInt(b.dataset.slot)})});
+    const d=await r.json();
+    if(d.error) alert(d.error);
+    await refreshKeys();
+  });
+  keypanel.querySelectorAll('button[data-act="gen"]').forEach(b=>b.onclick=async()=>{
+    const slot=parseInt(b.dataset.slot);
+    const info=st.slots.find(x=>x.slot===slot);
+    let msg, force=false;
+    if(info.present){
+      msg=`Slot ${slot} ALREADY has a key (${info.comment||info.fingerprint||'set'}). `+
+        `Regenerating PERMANENTLY retires it — every anchor already armed with its `+
+        `public half will need re-arming family-wide. This cannot be undone. `+
+        `Plug in the NEW physical key for this slot, then proceed.`;
+      force=true;
+    } else {
+      msg=`Generate a brand-new hardware-backed key for slot ${slot}. Plug in the `+
+        `physical key meant for this slot first — it will ask for a PIN, then need `+
+        `a TOUCH. mudra never sees the private half either way.`;
+    }
+    if(!confirm(msg+' Proceed?')) return;
+    b.disabled=true;
+    await fetch('/api/keysetup/generate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({slot,force})});
+    pollLog();
+  });
 }
 async function refresh(){
   const r=await fetch('/api/status'); const d=await r.json();
@@ -716,7 +897,11 @@ async function pollLog(){
     log.textContent=d.log.map(e=>e.t+'  '+e.msg).join('\\n');
     document.getElementById('touch').style.display=
       d.log.length && d.log[d.log.length-1].msg.includes('TOUCH')?'block':'none';
-    if(d.done){clearInterval(t);document.getElementById('touch').style.display='none';refresh();}
+    if(d.done){
+      clearInterval(t);document.getElementById('touch').style.display='none';
+      refresh();
+      if(keypanel.style.display!=='none') refreshKeys();
+    }
   },800);
 }
 refresh(); setInterval(refresh, 30000);
@@ -820,6 +1005,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # blob — a preview shows WHICH keys, not the key material itself.
             keys = [ln.split()[-1] for ln in body.strip().split("\n") if ln.strip()]
             self._send(json.dumps({"keys": keys}))
+        elif p == "/api/keysetup/status":
+            self._send(json.dumps(keyslot_status()))
         else:
             self._send('{"error":"not found"}', code=404)
 
@@ -827,11 +1014,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._authed():
             return self._send('{"error":"unauthorized"}', code=401)
         path = urllib.parse.urlparse(self.path).path
-        if path not in ("/api/arm", "/api/seal"):
+        if path not in ("/api/arm", "/api/seal", "/api/keysetup/generate",
+                        "/api/keysetup/map"):
             return self._send('{"error":"not found"}', code=404)
         try:
             n = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(min(n, 4096)) or "{}")
+            if path == "/api/keysetup/map":
+                slot = req.get("slot")
+                if slot not in (1, 2, 3, 4):
+                    return self._send('{"error":"slot must be 1-4"}', code=400)
+                fp = keymap_register(slot)
+                return self._send(json.dumps({"ok": True, "fingerprint": fp}))
+            if path == "/api/keysetup/generate":
+                slot = req.get("slot")
+                if slot not in (1, 2, 3, 4):
+                    return self._send('{"error":"slot must be 1-4"}', code=400)
+                threading.Thread(target=CEREMONY.keysetup,
+                                 args=(slot, bool(req.get("force"))),
+                                 daemon=True).start()
+                return self._send('{"ok":true}')
             name = req.get("repo")
             if name not in ROSTER:
                 return self._send('{"error":"unknown repo"}', code=400)
@@ -878,6 +1080,33 @@ def cli_audit(args):
     print("\naudit clean: family invariants hold")
 
 
+def cli_keysetup(args):
+    if "--slot" in args:
+        slot = int(args[args.index("--slot") + 1])
+        force = "--force" in args
+        CEREMONY.keysetup(slot, force=force)
+        for e in CEREMONY.log:
+            print(f"{e['t']}  {e['msg']}")
+        sys.exit(0 if CEREMONY.done == "provisioned" else 1)
+    if "--map" in args:
+        slot = int(args[args.index("--map") + 1])
+        try:
+            fp = keymap_register(slot)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc))
+        print(f"slot {slot} <- {fp}")
+        return
+    st = keyslot_status()
+    print(f"key home: {st['key_home']} "
+          f"({'exists' if st['key_home_exists'] else 'MISSING'})")
+    for s in st["slots"]:
+        if not s["present"]:
+            print(f"  slot {s['slot']}: empty")
+            continue
+        mark = " <- plugged in now" if st["mapped_slot"] == s["slot"] and st["detected_fp"] else ""
+        print(f"  slot {s['slot']}: {s.get('comment') or '(no comment)'}{mark}")
+
+
 def cli_open(args):
     """The whole point of a desk instead of a runbook: no command to
     remember, no token to go dig out of the journal. Reads the running
@@ -908,9 +1137,10 @@ def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
         print(__doc__ or "mudra status|audit|sync-signers <repo> [--dry]|"
-              "arm <repo>|seal <repo>|serve [--port N]|open")
+              "arm <repo>|seal <repo>|keysetup|serve [--port N]|open")
         print("mudra status [--json] [--no-remote] · audit [--remote] · "
               "sync-signers <repo> [--dry] · arm <repo> · seal <repo> [--key N] · "
+              "keysetup [--slot N [--force]] [--map N] · "
               "serve [--port N] · open [--print]")
         return
     cmd, rest = args[0], args[1:]
@@ -918,6 +1148,8 @@ def main():
         cli_status(rest)
     elif cmd == "audit":
         cli_audit(rest)
+    elif cmd == "keysetup":
+        cli_keysetup(rest)
     elif cmd == "sync-signers":
         body = sync_signers(rest[0], dry="--dry" in rest)
         print(body if "--dry" in rest else f"{rest[0]}: anchor rebuilt ({EXPECTED_KEYS} keys)")

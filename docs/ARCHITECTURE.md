@@ -27,38 +27,49 @@ nothing to keep in sync because it never stores what it can re-derive:
 
 - **The queue is derived from reality.** A published release with no `.sig` asset IS the
   "AWAITING SEAL" entry. An empty `allowed_signers` IS the unarmed state. A `VERSION` whose
-  tag doesn't exist yet IS "seat's move, on GO." `mudra status` reads git, the filesystem, and
-  (unless `--no-remote`) the GitHub API fresh on every call — there is nothing to invalidate,
-  because nothing is cached across runs.
+  tag doesn't exist yet IS the untagged state — a candidate still in the seat's hands, on GO.
+  `mudra status` reads git, the filesystem, and (unless `--no-remote`) the GitHub API fresh on
+  every call — there is nothing to invalidate, because nothing is cached across runs.
 - **The only two files mudra writes for itself** are `~/.config/mudra/session.json` (the
   running serve's port + one-boot token, so `mudra open` needs no journalctl) and
   `~/.config/mudra/keymap.json` (which physical FIDO2 key handle N pairs with, learned on
-  first successful seal). Both are pure conveniences; deleting either just means the next
-  `mudra open`/seal re-derives or re-learns what it needs.
+  first successful seal, or written directly by `keysetup`'s **this is the plugged-in key**).
+  Both are pure conveniences; deleting either just means the next `mudra open`/seal/keysetup
+  re-derives or re-learns what it needs. `MUDRA_KEYMAP_PATH` overrides the second — load-bearing
+  for tests, which must never risk mapping a real device to a throwaway fixture slot.
+- **The key home itself is not "for mudra"** — `~/.ssh/asuramaya-master/` predates mudra and
+  every pill's `sync_signers` reads from it. `keysetup` is the one place mudra **writes** there
+  (minting a fresh handle's public half + local stub, see below); it is not one of the two
+  self-owned convenience files above, and unlike them it is never safe to just delete.
 
-## The two roles that never overlap
+## The three roles that never overlap
 
 `repo_state()` / `scan()` / `audit()` only ever **read**. `sync_signers()` and the `Ceremony`
-class are the only two places mudra **writes** into a tracked repo. `Ceremony.arm` and
-`Ceremony.seal` are two SEPARATE ceremonies, deliberately, not one flow with a flag: arm needs
-only the public keys (`sync_signers` rebuild-from-all, never append, refuses on anything but
-exactly 4 keys) and works on a repo with no tag at all — that has to be true, or the UI's whole
-opening move (a stranger's first act with any repo) has nowhere to happen. `Ceremony.seal`
-needs the operator's physical touch and a *published* release; it refuses outright if the
-anchor isn't armed yet rather than arming it as a side effect — bundling the two once meant
-arm could only ever run after a tag existed (release.yml's `git archive` tarball would have
-shipped mudra's own first release with a permanently empty anchor; caught before it happened,
-see [RELEASING.md](RELEASING.md)). `seal` downloads the *published* manifest, shells to
-`ssh-keygen -Y sign` against the operator's hardware key, uploads the `.sig`, then
-re-downloads everything and verifies it back exactly as an end user's own install would. mudra
-never has a code path that can sign without the operator's own physical touch — see
-[SECURITY.md](../.github/SECURITY.md) for why that boundary is load-bearing.
+class are the only two places mudra **writes** into a tracked repo or the key home.
+`Ceremony.arm`, `Ceremony.seal`, and `Ceremony.keysetup` are three SEPARATE ceremonies,
+deliberately, not one flow with flags: arm needs only the public keys (`sync_signers`
+rebuild-from-all, never append, refuses on anything but exactly 4 keys) and works on a repo with
+no tag at all — that has to be true, or the UI's whole opening move (a stranger's first act with
+any repo) has nowhere to happen. `Ceremony.seal` needs the operator's physical touch and a
+*published* release; it refuses outright if the anchor isn't armed yet rather than arming it as
+a side effect — bundling the two once meant arm could only ever run after a tag existed
+(release.yml's `git archive` tarball would have shipped mudra's own first release with a
+permanently empty anchor; caught before it happened, see [RELEASING.md](RELEASING.md)). `seal`
+downloads the *published* manifest, shells to `ssh-keygen -Y sign` against the operator's
+hardware key, uploads the `.sig`, then re-downloads everything and verifies it back exactly as
+an end user's own install would. `Ceremony.keysetup` is rarer still — it doesn't touch a repo at
+all, only `~/.ssh/asuramaya-master/`, minting `ssh-keygen -t ed25519-sk -O resident` straight
+into an empty slot (or, with `force`, an occupied one) and refusing the occupied case without it.
+mudra never has a code path that can sign, or mint a new master identity, without the operator's
+own physical touch — see [SECURITY.md](../.github/SECURITY.md) for why that boundary is
+load-bearing.
 
-Both ceremonies share ONE lock (`Ceremony.lock`, one `active` ceremony at a time, for any
-repo): arming writes the same anchor file a concurrent seal might be reading mid-ceremony for
-that repo, and "arm is just a local file write, no network, no touch" is exactly the reasoning
-that would justify skipping the lock and would be wrong — a write racing a read of the same
-file is a real hazard regardless of how low-stakes either side looks in isolation.
+All three ceremonies share ONE lock (`Ceremony.lock`, one `active` ceremony at a time, for any
+repo or slot): arming writes the same anchor file a concurrent seal might be reading mid-ceremony
+for that repo, keysetup writes into the same key home an in-flight arm's `sync_signers()` reads
+from, and "it's just a local file write, no network, no touch" is exactly the reasoning that
+would justify skipping the lock and would be wrong — a write racing a read of the same file is a
+real hazard regardless of how low-stakes either side looks in isolation.
 
 ## Signing itself
 
