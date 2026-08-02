@@ -30,8 +30,18 @@ import webbrowser
 HOME = os.path.expanduser("~")
 REPO_ROOT = os.environ.get("MUDRA_REPO_ROOT", os.path.join(HOME, "code", "REPOS"))
 KEY_HOME = os.environ.get("MUDRA_KEY_HOME", os.path.join(HOME, ".ssh", "asuramaya-master"))
+# sutra is deliberately NOT here: RELEASE.md:201, the family's own ratified
+# doctrine, rules it n/a for release-signing — vendored byte-identical into
+# each pill's own .deb, no daemon/CLI/artifact of its own, integrity is the
+# vendor hash chain (vendor.sh's per-file sha256, checked continuously by
+# every consuming pill's own check-sutra), never a repo-level signature
+# checked once at download. Caught as a near-miss and documented in sutra's
+# own docs on 2026-08-01 (commit f77b37a) — then armed for real through this
+# desk the very next day anyway, because nothing here knew the exemption
+# existed. Reverted (sutra commit d87af8b) the same day it happened. Do not
+# re-add sutra without a doctrine change in RELEASE.md first.
 DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestalt",
-                 "sutra", "~/code/rotten-apple", "mudra"]
+                 "~/code/rotten-apple", "mudra"]
 # mudra tracks ITSELF too — it's not exempt from the doctrine it enforces.
 # self_path resolves to wherever THIS script's repo actually lives (not
 # necessarily REPO_ROOT/mudra — matters if MUDRA_REPO_ROOT is overridden,

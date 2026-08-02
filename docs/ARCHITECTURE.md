@@ -74,7 +74,7 @@ real hazard regardless of how low-stakes either side looks in isolation.
 ## Signing itself
 
 mudra tracks itself in its own roster (`_self_path`, above) and is not exempt from the
-doctrine it enforces on the other eight repos — including this one. `packaging/release-signing/
+doctrine it enforces on the other seven repos — including this one. `packaging/release-signing/
 allowed_signers` ships **empty** (the inert, pre-arming state every repo starts in) and
 `packaging/sync-signers.sh` + `make sync-signers` exist to rebuild it, exactly like any pill,
 but **arming is a decision, not a default**: nothing in this repo runs that script for you, and
@@ -103,20 +103,26 @@ a wrinkle exists, not a reassurance that one doesn't.
 
 ## mudra's roster is wider than any one coordinator's charter
 
-`DEFAULT_REPOS` tracks **nine** repos. REPO-STANDARD.md's `packaging/` convergence effort
-covers **eight** of them (the five pills + gestalt + sutra + mudra) — that was the full set
-alfred's own coordination charter spans (ByeByte, RAMstein, coldspot, gestalt, kast, mudra,
-phanspeed, sutra), and every measurement of "is the family converged" naturally inherited that
-boundary without anyone writing down that it existed. **rotten-apple is the ninth, and it was
+`DEFAULT_REPOS` tracks **eight** repos. REPO-STANDARD.md's `packaging/` convergence effort
+covers **seven** of them (the five pills + gestalt + mudra) — that was the full set alfred's
+own coordination charter spans for packaging-layout purposes (ByeByte, RAMstein, coldspot,
+gestalt, kast, mudra, phanspeed, and sutra too, on the same layout for file-structure
+consistency), and every measurement of "is the family converged" naturally inherited that
+boundary without anyone writing down that it existed. **rotten-apple is the eighth, and it was
 never in that set.** It's Ra's house, not alfred's: a Rust workspace with no `VERSION` file at
 all (its version lives in `Cargo.toml`'s `[workspace.package]`), and its anchor sits at the
 pre-convergence root `release-signing/allowed_signers` — genuinely armed, real keys — **by
 design, not by lag**. Unlike gestalt, there is nothing here that "converges" later; rotten-apple
 simply isn't shaped like a `packaging/`-layout repo and was never going to be.
 
+(sutra sits on alfred's packaging-layout charter but is deliberately absent from
+`DEFAULT_REPOS` itself — RELEASE.md:201 rules it n/a for release-signing entirely, a
+different axis than layout convergence. See the comment above `DEFAULT_REPOS` in
+`src/bin/mudra` for the incident that made this worth writing down.)
+
 This mattered because a straddle that read "root, then packaging/" for every repo made the two
-sets look like one set with a rollout in progress — which was true for eight repos and false
-for the ninth, and nothing distinguished them. Ruling 23d9e8e4 (2026-08-01): a NAMED exception,
+sets look like one set with a rollout in progress — which was true for seven repos and false
+for the eighth, and nothing distinguished them. Ruling 23d9e8e4 (2026-08-01): a NAMED exception,
 not a generic probe. `_ROOT_LAYOUT_REPOS = {"rotten-apple"}` in `src/bin/mudra` is the one
 place this fact lives in code; `version_path()` / `anchor_file()` / `anchor_rel()` take a
 single fixed `packaging/` path for everyone not in that set. A repo matching **neither**

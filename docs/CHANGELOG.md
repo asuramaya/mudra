@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.1 — sutra was never mudra's to arm (2026-08-02)
+
+Removed sutra from `DEFAULT_REPOS`. RELEASE.md:201, the family's own ratified doctrine,
+already ruled it n/a for release-signing entirely — vendored byte-identical into each
+pill's own `.deb`, no daemon/CLI/artifact of its own, integrity is the vendor hash chain
+(`vendor.sh`'s per-file sha256, checked continuously by every consuming pill's own
+`check-sutra`), never a repo-level signature checked once at download. Sutra's own docs
+already said this, rewritten the day before after a near-miss caught before anything
+shipped (commit f77b37a) — but nothing in mudra's *roster* knew about that exemption, so
+its card rendered exactly like every other repo's: an ARM button, no distinguishing
+signal. The near-miss happened for real the very next day, through this desk, arming
+sutra's anchor with 4 real keys. Reverted in sutra's own repo the same day (commit
+d87af8b) before anything downstream ever consumed it — no tag, no seal, nothing relied
+on the armed state, so this is undoing an errant arm, not re-cutting a sealed release.
+
+Surfaced a real gap while investigating: there is currently no way to add or remove a
+repo from mudra's roster except editing `DEFAULT_REPOS` in `src/bin/mudra` directly (or
+overriding it wholesale via `MUDRA_REPOS`) — no CLI verb, no GUI, and no flag anywhere
+that a tracked repo might be structurally exempt from release-signing rather than just
+not-yet-armed. Sutra's removal fixes the one known instance; the general case (a
+roster-editing surface, and/or a way to mark an entry as signing-exempt so a future
+mistake like this fails loud instead of silently) is still open.
+
 ## 0.8.0 — the key setup wizard (2026-08-02)
 
 The desk's rarest, highest-stakes act finally has a facilitator: `keysetup`, a wizard for
