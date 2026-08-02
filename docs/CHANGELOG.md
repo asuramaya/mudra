@@ -34,6 +34,15 @@ each carry their own per-slot RP ID (`ssh:asuramaya-master-N`, visible in a hard
 own credential manager, not just mudra's view of it) — caught by comparing the two before
 `keysetup` was ever used to mint anything. Now matches: `application=ssh:asuramaya-master-{slot}`.
 
+The wizard panel's first cut also had a UX bug: since only one physical key is ever plugged
+in at a time, **this is the plugged-in key** showing as an equally live action on all 4 slots
+made every slot look like it might be the connected one. Reorganized: each slot card now
+leads with a header row (slot, comment or "empty", a **plugged in now** chip when it's the
+one actually detected, REGENERATE flush right), the fingerprint gets its own trimmed line
+(no more repeating the comment that's already a chip), and the map button only appears on
+slots where clicking it would actually change something — gone from the one slot that's
+already home, present as the correction path on the other three.
+
 ## 0.1.0 — the seal desk opens (2026-07-19)
 
 - Derived-from-reality release queue: published-release-without-.sig IS the

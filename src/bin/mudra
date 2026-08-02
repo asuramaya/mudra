@@ -734,6 +734,10 @@ button.ghost { background:transparent; color:var(--dim); border:1px solid #555;
 button.ghost:disabled { border-color:#3a3a3a; }
 #keypanel .card b { min-width:5em; }
 #keypanel .fp { color:var(--dim); font-size:.8em; font-family:monospace; }
+.card.keyslot { display:block; }
+.keyslot-head { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; }
+.keyslot .fp { display:block; margin:.6rem 0; }
+.keyslot button.ghost { display:block; }
 select { background:#333; color:var(--fg); border:1px solid #555;
          border-radius:999px; padding:.15em .5em; font-size:.9em; }
 select.det { background:color-mix(in srgb,var(--good) 25%,transparent);
@@ -785,6 +789,12 @@ keysBtn.onclick=async()=>{
   keysBtn.textContent=opening?'hide keys':'manage keys';
   if(opening) await refreshKeys();
 };
+function trimFp(fp){
+  // drop the bit-length and the trailing comment — the comment already
+  // shows as its own chip, repeating it next to the hash is just noise
+  const m=fp.match(/^\\d+\\s+(\\S+)\\s+\\S+\\s+(\\(.+\\))$/);
+  return m?`${m[1]} ${m[2]}`:fp;
+}
 async function refreshKeys(){
   const r=await fetch('/api/keysetup/status'); const st=await r.json();
   let html=`<div class="card"><b>key home</b>`+
@@ -792,17 +802,23 @@ async function refreshKeys(){
          st.key_home_exists?'dimc':'warn')+
     `<span class="fp">${st.key_home}</span></div>`;
   for(const s of st.slots){
+    // Only one physical key is ever plugged in at a time, so "this is the
+    // plugged-in key" is only a MEANINGFUL click on a slot that isn't
+    // already its home — showing it everywhere made every slot look
+    // equally "the" plugged-in one. It stays on the other slots as the
+    // correction path for a wrong mapping.
     const pluggedIn=st.detected_fp && st.mapped_slot===s.slot;
-    html+=`<div class="card">`;
+    const canMap=st.detected_fp && st.mapped_slot!==s.slot;
+    html+=`<div class="card keyslot"><div class="keyslot-head">`;
     html+=`<b>slot ${s.slot}</b>`;
     html+=s.present?chip(s.comment||'set','ok'):chip('empty','dimc');
-    if(s.fingerprint) html+=`<span class="fp">${s.fingerprint}</span>`;
     if(pluggedIn) html+=chip('plugged in now','ok');
-    html+=`<button data-act="map" data-slot="${s.slot}" class="ghost"`+
-          (st.detected_fp&&s.present?'':' disabled')+
-          `>this is the plugged-in key</button>`;
     html+=`<button data-act="gen" data-slot="${s.slot}">`+
           (s.present?'REGENERATE':'GENERATE')+`</button>`;
+    html+=`</div>`;
+    if(s.fingerprint) html+=`<span class="fp">${trimFp(s.fingerprint)}</span>`;
+    if(canMap) html+=`<button data-act="map" data-slot="${s.slot}" class="ghost">`+
+                     `this is the plugged-in key</button>`;
     html+=`</div>`;
   }
   keypanel.innerHTML=html;
