@@ -51,6 +51,19 @@ from one without feedback: the panel now shows a **connected, not mapped to a sl
 note whenever a device is detected but unregistered, so "is this thing even seeing my key" has a
 direct answer instead of just silence.
 
+The header key-picker had the SAME blind spot, one layer up: `/api/status` resolved a detected
+device straight to a slot number or threw it away entirely — `null` either meant "nothing plugged
+in" or "something's plugged in but not registered", indistinguishable from the header's own view.
+Swap in an unmapped key and the picker just silently kept showing whatever was last picked, with
+no visual difference from a confirmed detection. `/api/status` now carries the raw fingerprint
+alongside the resolved slot, and the picker has a real third state: confirmed (green), connected
+but unmapped (amber, hovering explains why and how to fix it), or nothing detected (plain). Found
+in the same investigation: the picker's un-highlighted state was never actually rendering the
+intended dark background at all — `<select>` defaults to native OS widget chrome for its own box
+regardless of CSS `background-color` unless `appearance: none` is set, so an *unconfirmed* pick
+was painting as a bright, confident-looking control. Fixed with `appearance: none` plus a small
+inline SVG for the dropdown arrow the browser no longer draws on its own.
+
 ## 0.1.0 — the seal desk opens (2026-07-19)
 
 - Derived-from-reality release queue: published-release-without-.sig IS the

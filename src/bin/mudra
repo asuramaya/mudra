@@ -110,11 +110,6 @@ def learn_key(fp, n):
         json.dump(m, f, indent=1)
 
 
-def detected_key():
-    fp = device_fingerprint()
-    return load_keymap().get(fp) if fp else None
-
-
 def keyslot_status():
     """The wizard's whole picture in one call: which of the EXPECTED_KEYS
     handles already have a public half on disk, and whether the physical
@@ -737,10 +732,15 @@ button.ghost:disabled { border-color:#3a3a3a; }
 .card.keyslot { display:block; }
 .keyslot-head { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; }
 .keyslot .fp { display:block; margin:.6rem 0 0; }
-select { background:#333; color:var(--fg); border:1px solid #555;
-         border-radius:999px; padding:.15em .5em; font-size:.9em; }
-select.det { background:color-mix(in srgb,var(--good) 25%,transparent);
+select { appearance:none; -webkit-appearance:none; background:#333; color:var(--fg);
+         border:1px solid #555; border-radius:999px; padding:.15em 1.6em .15em .5em;
+         font-size:.9em; background-image:
+         url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 6'%3E%3Cpath fill='%239aa0a6' d='M0 0h8L4 6z'/%3E%3C/svg%3E");
+         background-repeat:no-repeat; background-position:right .55em center; }
+select.det { background-color:color-mix(in srgb,var(--good) 25%,transparent);
              color:var(--good); border-color:var(--good); }
+select.unk { background-color:color-mix(in srgb,var(--warn) 20%,transparent);
+             color:var(--warn); border-color:var(--warn); }
 #log { background:#111; border-radius:10px; padding:.8rem 1rem; font:13px/1.6 monospace;
        white-space:pre-wrap; display:none; }
 #touch { display:none; text-align:center; font-size:1.5em; color:var(--warn);
@@ -771,14 +771,19 @@ const chip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
 const keysel=document.getElementById('keysel');
 keysel.value=localStorage.getItem('mudraKey')||'1';
 keysel.onchange=()=>localStorage.setItem('mudraKey',keysel.value);
-function paintKeysel(detected){
-  // One physical key at a time is plugged in and it's good for every
-  // project — this picker lives in the header, not per-repo card, and
-  // detection (when available) always wins over a stale manual pick.
+function paintKeysel(detected,detectedFp){
+  // Three states, not two: a confirmed slot (green), a device that's
+  // physically connected but never registered to any slot (amber — this
+  // used to be indistinguishable from "nothing plugged in" because the
+  // API dropped the raw fingerprint whenever it didn't resolve to a slot),
+  // and truly nothing detected (plain — whatever was last manually picked,
+  // stale by definition, hence the warning in the title).
   if(detected){ keysel.value=String(detected); localStorage.setItem('mudraKey',keysel.value); }
-  keysel.className=detected?'det':'';
+  keysel.className=detected?'det':(detectedFp?'unk':'');
   keysel.title=detected?('key '+detected+' detected on USB')
-                       :'no key detected — pick the one that is plugged in';
+              :detectedFp?(detectedFp+' is plugged in but not mapped to any slot — '
+                          +'this picker is a manual guess. Register it: keysetup --map N')
+              :'no key detected — pick the one that is plugged in (manual guess, unverified)';
 }
 const keysBtn=document.getElementById('keysBtn');
 const keypanel=document.getElementById('keypanel');
@@ -864,7 +869,7 @@ async function refreshKeys(){
 }
 async function refresh(){
   const r=await fetch('/api/status'); const d=await r.json();
-  paintKeysel(d.detected);
+  paintKeysel(d.detected, d.detected_fp);
   const el=document.getElementById('repos'); el.innerHTML='';
   for(const s of d.repos){
     const div=document.createElement('div');
@@ -1015,7 +1020,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(PAGE.replace("%VER%", MUDRA_VERSION), "text/html",
                        cookie=q.get("token", [None])[0])
         elif p == "/api/status":
-            self._send(json.dumps({"repos": scan(), "detected": detected_key()}))
+            fp = device_fingerprint()
+            # "detected" (a resolved slot number) is what the picker needs to
+            # auto-select; "detected_fp" is the raw fingerprint, carried
+            # through even when it maps to nothing yet — without it, a
+            # connected-but-unmapped device is INDISTINGUISHABLE from no
+            # device at all to anything reading this endpoint, header
+            # included.
+            self._send(json.dumps({"repos": scan(),
+                                   "detected": load_keymap().get(fp) if fp else None,
+                                   "detected_fp": fp}))
         elif p == "/api/log":
             self._send(json.dumps({"log": CEREMONY.log, "done": CEREMONY.done,
                                    "active": CEREMONY.active}))
