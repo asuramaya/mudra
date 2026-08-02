@@ -28,8 +28,10 @@ says so plainly. After upload, mudra re-downloads everything and verifies hash c
 signature exactly as an end user would — a card only ever reads "sealed" once that's been
 *proven*, not just uploaded.
 
-The key-picker dropdown remembers which physical key handle N pairs with, once you've sealed
-with it successfully — see `src/bin/mudra`'s device-fingerprint ladder in
+The key-picker dropdown lives in the header, not on each card — one physical key is plugged
+in at a time and it's good for whichever repo gets sealed next, so there's one picker for the
+whole desk. It remembers which physical key handle N pairs with, once you've sealed with it
+successfully — see `src/bin/mudra`'s device-fingerprint ladder in
 [ARCHITECTURE.md](ARCHITECTURE.md) if you're curious how.
 
 ## The CLI (same verbs, no browser)

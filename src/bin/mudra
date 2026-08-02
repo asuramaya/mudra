@@ -304,7 +304,7 @@ def repo_state(name, no_remote=False):
     elif not st["version"]:
         st["state"] = "no VERSION"
     elif not st["tagged"]:
-        st["state"] = "untagged (seat's move, on GO)"
+        st["state"] = "untagged"
     elif rel is None:
         st["state"] = "tagged (remote unknown)"
     elif not rel.get("published"):
@@ -597,8 +597,11 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
         --bg:#1b1d1a; --card:#262924; --fg:#e8eaed; }
 body { background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif;
        margin:0; padding:2rem; max-width:900px; margin-inline:auto; }
-h1 { color:var(--accent); font-weight:600; letter-spacing:.04em; }
+h1 { color:var(--accent); font-weight:600; letter-spacing:.04em; margin:0; }
 h1 small { color:var(--dim); font-weight:400; font-size:.55em; margin-left:.8em; }
+.topbar { display:flex; align-items:center; justify-content:space-between; gap:1rem;
+          flex-wrap:wrap; }
+.keypicker { display:flex; align-items:center; gap:.5em; }
 .card { background:var(--card); border-radius:14px; padding:1rem 1.2rem; margin:.7rem 0;
         display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
 .card b { font-size:1.05em; min-width:7.5em; }
@@ -622,15 +625,39 @@ select.det { background:color-mix(in srgb,var(--good) 25%,transparent);
 label { color:var(--dim); font-size:.85em; }
 footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
 </style></head><body>
-<h1>mudra</h1>
+<div class="topbar">
+  <h1>mudra</h1>
+  <div class="keypicker">
+    <label for="keysel">key plugged in</label>
+    <select id="keysel">
+      <option value="1">Key 1</option>
+      <option value="2">Key 2</option>
+      <option value="3">Key 3</option>
+      <option value="4">Key 4</option>
+    </select>
+  </div>
+</div>
 <div id="touch">TOUCH YOUR KEY NOW</div>
 <div id="repos">scanning releases…</div>
 <pre id="log"></pre>
 <footer>v%VER%</footer>
 <script>
 const chip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
+const keysel=document.getElementById('keysel');
+keysel.value=localStorage.getItem('mudraKey')||'1';
+keysel.onchange=()=>localStorage.setItem('mudraKey',keysel.value);
+function paintKeysel(detected){
+  // One physical key at a time is plugged in and it's good for every
+  // project — this picker lives in the header, not per-repo card, and
+  // detection (when available) always wins over a stale manual pick.
+  if(detected){ keysel.value=String(detected); localStorage.setItem('mudraKey',keysel.value); }
+  keysel.className=detected?'det':'';
+  keysel.title=detected?('key '+detected+' detected on USB')
+                       :'no key detected — pick the one that is plugged in';
+}
 async function refresh(){
   const r=await fetch('/api/status'); const d=await r.json();
+  paintKeysel(d.detected);
   const el=document.getElementById('repos'); el.innerHTML='';
   for(const s of d.repos){
     const div=document.createElement('div');
@@ -651,25 +678,12 @@ async function refresh(){
     chips+=chip(s.state, canSeal?'warn':(s.state==='sealed'?'ok':'dimc'));
     div.innerHTML=`<b>${s.name}</b>${chips}`;
     if(canSeal){
-      const sel=document.createElement('select');
-      sel.title='which physical key is plugged in (handle N needs key N)';
-      for(let i=1;i<=4;i++){const o=document.createElement('option');
-        o.value=i;o.textContent='Key '+i;sel.appendChild(o);}
-      sel.value=d.detected||localStorage.getItem('mudraKey')||'1';
-      const paint=()=>{
-        sel.className=(d.detected&&+sel.value===d.detected)?'det':'';
-        sel.title=d.detected?('key '+d.detected+' detected on USB')
-                            :'no key detected — pick the inserted key';
-      };
-      paint();
-      sel.onchange=()=>{localStorage.setItem('mudraKey',sel.value);paint();};
-      div.appendChild(sel);
       const btn=document.createElement('button');
       btn.textContent='SEAL';
       btn.onclick=async()=>{
         btn.disabled=true;
         await fetch('/api/seal',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({repo:s.name,key:parseInt(sel.value)})});
+          body:JSON.stringify({repo:s.name,key:parseInt(keysel.value)})});
         pollLog();
       };
       div.appendChild(btn);

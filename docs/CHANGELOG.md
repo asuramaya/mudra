@@ -338,3 +338,10 @@ which resolved a path-based roster entry's (rotten-apple's) anchor from `REPO_RO
 instead of its own real path — silently wrong for any repo outside `REPO_ROOT`, only ever
 "working" for mudra itself by coincidence (mudra happens to live inside `REPO_ROOT`). Found
 while already in that exact function for the arm/seal split.
+
+Two small desk UX fixes: the `untagged` chip dropped its `(seat's move, on GO)` suffix — jargon
+that meant something in a doc, not a live status board a card shows on every load. And the
+physical-key picker moved out of each AWAITING SEAL card and into the header, once: only one key
+is ever plugged in at a time and it's good for whichever repo gets sealed next, so a picker per
+card was implying a choice that doesn't exist. Detection still wins over a stale manual pick on
+every refresh, same as before.
