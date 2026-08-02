@@ -1,7 +1,9 @@
 # Using mudra
 
-Everything the CLI and the GUI can do. If you just want to clear the queue, `make serve` (or
-click the app-grid icon) and use the GUI — this file is for everything past that.
+Everything the CLI and the GUI can do. If you haven't yet, `src/bin/mudra init` first — it
+configures your own roster, key home, and signing conventions; nothing here has anything
+tracked or hardcoded until you do. Then `make serve` (or click the app-grid icon) and use
+the GUI — this file is for everything past that.
 
 ## The desk (GUI)
 
@@ -10,9 +12,9 @@ make serve              # http://127.0.0.1:7770, loopback only
 src/bin/mudra open       # opens it in your browser, already authenticated
 ```
 
-Once installed (`make install`), `mudra serve` runs as a systemd `--user` unit and starts with
-your graphical session — `systemctl --user status mudra` / `restart mudra` /
-`journalctl --user -u mudra` are the usual levers.
+Once installed (`make install`, which includes `install-service`), `mudra serve` runs as a
+systemd `--user` unit and starts with your graphical session — `systemctl --user status
+mudra` / `restart mudra` / `journalctl --user -u mudra` are the usual levers.
 
 Every repo renders as a card: version, tag state, anchor state (armed / inert / none),
 embedded-copy drift, working-tree dirt, and the derived verdict. Arm and seal are separate
@@ -34,9 +36,15 @@ whole desk. It remembers which physical key handle N pairs with, once you've sea
 successfully — see `src/bin/mudra`'s device-fingerprint ladder in
 [ARCHITECTURE.md](ARCHITECTURE.md) if you're curious how.
 
-**manage keys**, next to the picker, opens the wizard for the 4 canonical handles
-themselves — the desk's rarest, highest-stakes act, one notch above sealing. Each of the
-4 slots shows empty or a fingerprint, a **plugged in now** chip when it's the one
+**setup**, in the header, opens the same configuration `mudra init` writes — repo root,
+roster, key home, key prefix, expected key count, namespace tag — editable from the
+browser and saved back to `~/.config/mudra/config.json`. Roster/key settings load once
+at process start, so a save here needs a `mudra serve` restart to take effect, same as
+editing the config file by hand.
+
+**manage keys**, next to it, opens the wizard for your canonical handles themselves —
+the desk's rarest, highest-stakes act, one notch above sealing. Each configured slot
+shows empty or a fingerprint, a **plugged in now** chip when it's the one
 actually detected (read-only status — one physical key is ever connected at a time,
 there's nothing to pick), and a **GENERATE**/**REGENERATE** button that mints a
 brand-new hardware-backed key straight into that slot (PIN dialog, then TOUCH).
@@ -44,9 +52,9 @@ brand-new hardware-backed key straight into that slot (PIN dialog, then TOUCH).
 the token, only its public half and a local handle stub (useless without the physical
 key present) ever touch disk. Regenerating an OCCUPIED slot asks a distinctly scarier
 confirmation than an empty one — it permanently retires whatever device was registered
-there, and every anchor already armed with its old public half needs re-arming,
-family-wide. Manual mapping — writing the "handle N" assignment for whatever's plugged
-in right now, no generation, no touch — is CLI-only: `keysetup --map N`.
+there, and every anchor already armed with its old public half needs re-arming
+everywhere it was used. Manual mapping — writing the "handle N" assignment for
+whatever's plugged in right now, no generation, no touch — is CLI-only: `keysetup --map N`.
 
 The panel polls every 2s while it's open, so physically swapping keys shows up without
 closing and reopening it. If a connected device isn't mapped to any slot yet, the panel
@@ -56,16 +64,17 @@ silent — that state means "register it" (`keysetup --map N`), not "detection i
 ## The CLI (same verbs, no browser)
 
 ```sh
-src/bin/mudra status [--json] [--no-remote]   # the family at a glance; --no-remote skips
+src/bin/mudra init                            # configure your roster, key home, etc.
+src/bin/mudra status [--json] [--no-remote]   # your roster at a glance; --no-remote skips
                                               # every gh call (offline, faster, no seal state)
-src/bin/mudra audit  [--remote]               # family invariants: same 4 canonical keys
+src/bin/mudra audit  [--remote]               # invariants: the same canonical keys
                                               # everywhere, embedded twins byte-identical,
                                               # principals/namespaces sane. Exits nonzero
                                               # and lists findings on any violation.
 src/bin/mudra sync-signers <repo> [--dry]     # rebuild <repo>'s anchor from the canonical
-                                              # key home (rebuild-from-all, refuses on
-                                              # anything but exactly 4 keys). --dry prints
-                                              # the would-be anchor body without writing.
+                                              # key home (rebuild-from-all, refuses unless
+                                              # the key count matches EXPECTED_KEYS). --dry
+                                              # prints the would-be anchor body without writing.
 src/bin/mudra arm <repo>                      # sync-signers, then a SCOPED commit + push,
                                               # in one act. Works on an untagged repo — that
                                               # is the entire point. Refuses if already armed.
@@ -73,7 +82,7 @@ src/bin/mudra seal <repo> [--key N]           # the full ceremony, terminal edit
                                               # if the anchor isn't armed yet — arm first;
                                               # --key picks which physical handle to sign
                                               # with when auto-detection can't.
-src/bin/mudra keysetup                        # the 4 handles at a glance: which are
+src/bin/mudra keysetup                        # your handles at a glance: which are
                                               # filled, which device is plugged in and
                                               # what it's mapped to
 src/bin/mudra keysetup --slot N [--force]     # mint a new hardware key into slot N;
@@ -89,15 +98,24 @@ mid-development. It fails only when a checked **invariant** is actually broken: 
 armed anchor, a malformed principal/namespace line, or an embedded `install.sh` copy that no
 longer matches its anchor file.
 
+`mudra init` writes `~/.config/mudra/config.json` with your roster, repo root, key home,
+key prefix, expected key count, and namespace tag — every var below overrides the config
+file for a one-off run (the same env>config>default precedence throughout).
+
 ## Environment
 
 | var | default | meaning |
 |---|---|---|
-| `MUDRA_REPO_ROOT` | `~/code/REPOS` | where the family lives |
-| `MUDRA_REPOS` | the nine tracked repos | comma-separated roster override |
-| `MUDRA_KEY_HOME` | `~/.ssh/asuramaya-master` | canonical key home (ruling 13ee52ce) |
-| `MUDRA_SIGN_KEY` | `…/id_asuramaya_master_1` | which handle to sign with, absent `--key` |
+| `MUDRA_REPO_ROOT` | `~/code/REPOS` | where your repos live |
+| `MUDRA_REPOS` | *(empty — configure your own)* | comma-separated roster override |
+| `MUDRA_KEY_HOME` | `~/.ssh/mudra-master` | canonical key home |
+| `MUDRA_KEY_PREFIX` | `master` | key naming — files become `id_<prefix>_N`, RP-ID/comment `<prefix>-N` |
+| `MUDRA_EXPECTED_KEYS` | `4` | how many signing keys (quorum size) |
+| `MUDRA_NAMESPACE_TAG` | *(none)* | extra namespace segment appended to every anchor line |
+| `MUDRA_ROOT_LAYOUT_REPOS` | *(empty)* | comma-separated repos NOT on the `packaging/` layout — see [ARCHITECTURE.md](ARCHITECTURE.md) |
+| `MUDRA_SIGN_KEY` | `<key_home>/id_<prefix>_1` | which handle to sign with, absent `--key` |
 | `MUDRA_KEYMAP_PATH` | `~/.config/mudra/keymap.json` | device-fingerprint → handle map |
+| `MUDRA_CONFIG_PATH` | `~/.config/mudra/config.json` | where `mudra init` writes/reads |
 | `MUDRA_PORT` | `7770` | desk port, 127.0.0.1 only, no override reaches beyond loopback |
 
 ## Troubleshooting
@@ -124,3 +142,15 @@ yet (needs root, once). Expected on a fresh checkout; see
 guard, not a bug. Regenerating an occupied slot permanently retires whatever device is
 registered there; pass `--force` (or confirm the REGENERATE dialog in the GUI) only once
 you mean it.
+
+**"no repos configured"** from `status`/`audit` — nothing's tracked yet. Run `src/bin/mudra
+init`, or set `MUDRA_REPOS` for a one-off run.
+
+**`make check-repo` fails on structure you didn't ask for** — that check enforces this
+project's own multi-repo layout convention (root file count, a README nav block), unrelated
+to whether mudra itself works. `MUDRA_SKIP_CHECK_REPO=1 make check` skips it.
+
+**Known platform limits** — release publishing only understands GitHub Releases (via the `gh`
+CLI); physical-key auto-detection only understands Yubico hardware (`ykman`). Signing itself
+works with any FIDO2 key (`ssh-keygen -Y` doesn't check vendor) — auto-detect just won't pick
+it automatically, so use the header key-picker or `--key N` manually.

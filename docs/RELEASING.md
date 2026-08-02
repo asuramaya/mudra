@@ -28,7 +28,7 @@ tag — that is the entire point of it being separate from seal):
 src/bin/mudra arm mudra
 ```
 
-previews which 4 keys are about to be written, asks for confirmation ("arming pins the master
+previews which keys are about to be written, asks for confirmation ("arming pins the master
 identity fail-closed *forever*"), then rebuilds the anchor and makes the SCOPED commit + push
 in one act. Or, the manual three-step version underneath it, if you want to see each act on
 its own:
@@ -40,11 +40,11 @@ git commit -m "arm release verification: pin the master identity"
 git push
 ```
 
-Either way this step is the operator's, at their hand — `KEY_HOME` is
-`~/.ssh/asuramaya-master`, outside every repo. `make sync-signers` alone only WRITES
-`packaging/release-signing/allowed_signers`; it never commits or pushes on its own, which is
-why `arm` exists as the one-shot version — the scoped commit is a separate, deliberate act
-either way, exactly as [SECURITY.md](../.github/SECURITY.md) requires.
+Either way this step is the operator's, at their hand — `KEY_HOME` is wherever your own
+`mudra init` (or `MUDRA_KEY_HOME`) points, outside every tracked repo. `make sync-signers`
+alone only WRITES `packaging/release-signing/allowed_signers`; it never commits or pushes on
+its own, which is why `arm` exists as the one-shot version — the scoped commit is a separate,
+deliberate act either way, exactly as [SECURITY.md](../.github/SECURITY.md) requires.
 
 **Why before the tag, and not folded into the seal ceremony afterward:** `.github/workflows/
 release.yml` builds `mudra.tar.gz` via `git archive` from the TAGGED commit, and that archive

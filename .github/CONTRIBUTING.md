@@ -1,7 +1,7 @@
 # Contributing to mudra
 
-mudra drives the family's release-signing ceremony. Contributions that keep its trust
-boundary small — it never holds key material, every signature is the operator's own physical
+mudra drives a release-signing ceremony for your own projects. Contributions that keep its
+trust boundary small — it never holds key material, every signature is your own physical
 touch — are very welcome.
 
 Before changing much, read [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). mudra is a single
@@ -12,7 +12,7 @@ the GitHub API on every call, on purpose.
 ## Setup
 
 ```bash
-git clone https://github.com/asuramaya/mudra
+git clone <your fork's URL>
 cd mudra
 make check      # check-repo + smoke — no root, no gh, no real keys, no network
 make serve      # http://127.0.0.1:7770
@@ -23,13 +23,15 @@ make serve      # http://127.0.0.1:7770
 Same ones CI runs:
 
 ```bash
-make check-repo    # REPO-STANDARD.md's structural gate
+make check-repo    # this project's own multi-repo structural gate (REPO-STANDARD.md)
 make smoke          # tests/smoke.sh — offline, fixture-only, throwaway keys
 ```
 
-`make check` runs both. Neither touches your real `~/.ssh/asuramaya-master` key home, a real
-repo in `~/code/REPOS`, or the network — `tests/smoke.sh` builds its own throwaway fixtures
-and keys under a temp directory.
+`make check` runs both. Neither touches your real key home, a real repo directory, or the
+network — `tests/smoke.sh` builds its own throwaway fixtures and keys under a temp directory.
+`check-repo` specifically enforces conventions from the maintaining family's own multi-repo
+standard, unrelated to whether mudra itself works — if you've reorganized this checkout for
+your own project layout, `MUDRA_SKIP_CHECK_REPO=1 make check` skips it.
 
 ## Style
 

@@ -1,6 +1,6 @@
 # polkit gate for the desk
 
-`com.asuramaya.mudra.policy` registers one action, `com.asuramaya.mudra.open-desk`,
+`com.mudra.open-desk.policy` registers one action, `com.mudra.open-desk`,
 `allow_active=auth_self_keep`. Once installed, opening the desk's token URL for
 the first time (minting a new session cookie) triggers the SAME
 fingerprint/password prompt as any other polkit-gated admin action on this
@@ -18,7 +18,7 @@ make install-polkit
 which is exactly:
 
 ```sh
-sudo install -m644 src/polkit/com.asuramaya.mudra.policy /usr/share/polkit-1/actions/
+sudo install -m644 src/polkit/com.mudra.open-desk.policy /usr/share/polkit-1/actions/
 systemctl --user restart mudra
 ```
 

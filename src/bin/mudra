@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-# mudra — the seal desk of the pill family.
+# mudra — a release-seal desk.
 #
-# Operator-side release manager: the seats build, commit, tag (on alfred's GO)
-# and CI publishes UNSIGNED artifacts + a sha256 manifest. mudra derives the
-# queue from reality — a published release missing its .sig IS a queue entry,
-# an empty allowed_signers IS the unarmed state — and hands the operator one
-# desk (CLI or local GUI) to arm anchors and seal manifests with the hardware
-# key. mudra never holds key material: signing shells to ssh-keygen and the
-# private halves never leave the FIDO2 keys. GPLv3, stdlib-only.
+# Release manager for your own projects: CI publishes UNSIGNED artifacts + a
+# sha256 manifest, and mudra derives a signing queue from reality — a
+# published release missing its .sig IS a queue entry, an empty
+# allowed_signers IS the unarmed state — then hands you one desk (CLI or
+# local GUI) to arm anchors and seal manifests with a hardware key. mudra
+# never holds key material: signing shells to ssh-keygen and the private
+# halves never leave the FIDO2 keys. GPLv3, stdlib-only.
 #
-# Doctrine: ~/code/REPOS/RELEASE.md is the truth; mudra automates its runbook.
-# The GUI binds to 127.0.0.1 only. The one act mudra will never do on its own
-# is the touch — that is the operator's hand, by design.
+# `mudra init` walks you through configuring your own roster and key home on
+# first run (see also `mudra keysetup` for minting the keys themselves). The
+# GUI binds to 127.0.0.1 only. The one act mudra will never do on its own is
+# the touch — that is yours, by design.
 
 import http.server
 import json
@@ -28,21 +29,48 @@ import urllib.parse
 import webbrowser
 
 HOME = os.path.expanduser("~")
-REPO_ROOT = os.environ.get("MUDRA_REPO_ROOT", os.path.join(HOME, "code", "REPOS"))
-KEY_HOME = os.environ.get("MUDRA_KEY_HOME", os.path.join(HOME, ".ssh", "asuramaya-master"))
-# sutra is deliberately NOT here: RELEASE.md:201, the family's own ratified
-# doctrine, rules it n/a for release-signing — vendored byte-identical into
-# each pill's own .deb, no daemon/CLI/artifact of its own, integrity is the
-# vendor hash chain (vendor.sh's per-file sha256, checked continuously by
-# every consuming pill's own check-sutra), never a repo-level signature
-# checked once at download. Caught as a near-miss and documented in sutra's
-# own docs on 2026-08-01 (commit f77b37a) — then armed for real through this
-# desk the very next day anyway, because nothing here knew the exemption
-# existed. Reverted (sutra commit d87af8b) the same day it happened. Do not
-# re-add sutra without a doctrine change in RELEASE.md first.
-DEFAULT_REPOS = ["ByeByte", "RAMstein", "coldspot", "phanspeed", "kast", "gestalt",
-                 "~/code/rotten-apple", "mudra"]
-# mudra tracks ITSELF too — it's not exempt from the doctrine it enforces.
+CONFIG_PATH = os.environ.get("MUDRA_CONFIG_PATH",
+                             os.path.join(HOME, ".config", "mudra", "config.json"))
+
+
+def load_config():
+    """Local, personal, never committed — same footing as keymap.json. Holds
+    everything that would otherwise have to be hardcoded to one specific
+    person's repo family: which repos to track, where the key home lives,
+    how many signers, naming/namespace conventions. `mudra init` writes
+    this; every MUDRA_* env var below still wins over it for a one-off
+    override, same precedence as always."""
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+_config = load_config()
+REPO_ROOT = os.environ.get(
+    "MUDRA_REPO_ROOT",
+    os.path.expanduser(_config.get("repo_root", os.path.join(HOME, "code", "REPOS"))))
+KEY_HOME = os.environ.get(
+    "MUDRA_KEY_HOME",
+    os.path.expanduser(_config.get("key_home", os.path.join(HOME, ".ssh", "mudra-master"))))
+KEY_PREFIX = os.environ.get("MUDRA_KEY_PREFIX", _config.get("key_prefix", "master"))
+EXPECTED_KEYS = int(os.environ.get("MUDRA_EXPECTED_KEYS", _config.get("expected_keys", 4)))
+NAMESPACE_TAG = os.environ.get("MUDRA_NAMESPACE_TAG", _config.get("namespace_tag", ""))
+# Repos NOT on the packaging/ layout (no packaging/VERSION; anchor sits at
+# the pre-convergence root release-signing/ instead) — rare, NAMED per-repo
+# exceptions, never a generic root-or-packaging probe for everyone (a probe
+# that assumed either layout for every repo once let a real armed anchor go
+# invisible — see docs/ARCHITECTURE.md). Empty by default; add your own
+# repo's name here only if it genuinely isn't shaped like a packaging/-layout
+# repo, never as a blanket "maybe" for the whole roster.
+_root_layout_env = os.environ.get("MUDRA_ROOT_LAYOUT_REPOS")
+if _root_layout_env is not None:
+    ROOT_LAYOUT_REPOS = {r for r in _root_layout_env.split(",") if r}
+else:
+    ROOT_LAYOUT_REPOS = set(_config.get("root_layout_repos", []))
+# mudra CAN track itself too, if you add "mudra" to your own roster — it's
+# not exempt from the doctrine it enforces on anything else you track.
 # self_path resolves to wherever THIS script's repo actually lives (not
 # necessarily REPO_ROOT/mudra — matters if MUDRA_REPO_ROOT is overridden,
 # e.g. by tests/smoke.sh's fixture roots), overriding the plain-name lookup.
@@ -59,8 +87,14 @@ with open(os.path.join(_self_path, "packaging", "VERSION")) as _f:
     MUDRA_VERSION = _f.read().strip()
 # Roster entries are names under REPO_ROOT, or paths (anything with a "/").
 # ROSTER maps display name -> absolute path; order is the desk's card order.
+# Empty by default — this is YOUR roster, not a shipped list of someone
+# else's projects. `mudra init` walks you through building it; MUDRA_REPOS
+# (comma-separated) overrides the config file for a one-off run.
+_repos_env = os.environ.get("MUDRA_REPOS")
+_repo_entries = ([r for r in _repos_env.split(",") if r] if _repos_env is not None
+                 else list(_config.get("repos", [])))
 ROSTER = {}
-for _e in [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).split(",") if r]:
+for _e in _repo_entries:
     if _e == "mudra":
         _p = _self_path
     else:
@@ -68,11 +102,10 @@ for _e in [r for r in os.environ.get("MUDRA_REPOS", ",".join(DEFAULT_REPOS)).spl
     ROSTER[os.path.basename(_p.rstrip("/"))] = _p
 REPOS = list(ROSTER)
 PORT = int(os.environ.get("MUDRA_PORT", "7770"))
-SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, "id_asuramaya_master_1"))
-EXPECTED_KEYS = 4
+SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, f"id_{KEY_PREFIX}_1"))
 KEYMAP_PATH = os.environ.get("MUDRA_KEYMAP_PATH",
                              os.path.join(HOME, ".config", "mudra", "keymap.json"))
-POLKIT_ACTION = "com.asuramaya.mudra.open-desk"
+POLKIT_ACTION = "com.mudra.open-desk"
 SESSION_PATH = os.path.join(HOME, ".config", "mudra", "session.json")
 
 
@@ -128,7 +161,7 @@ def keyslot_status():
     mapped_slot = load_keymap().get(fp) if fp else None
     slots = []
     for n in range(1, EXPECTED_KEYS + 1):
-        pub_path = os.path.join(KEY_HOME, f"id_asuramaya_master_{n}.pub")
+        pub_path = os.path.join(KEY_HOME, f"id_{KEY_PREFIX}_{n}.pub")
         try:
             with open(pub_path) as f:
                 line = f.read().strip()
@@ -142,7 +175,8 @@ def keyslot_status():
             slot["fingerprint"] = out.strip() if rc == 0 else None
         slots.append(slot)
     return {"key_home": KEY_HOME, "key_home_exists": os.path.isdir(KEY_HOME),
-            "slots": slots, "detected_fp": fp, "mapped_slot": mapped_slot}
+            "slots": slots, "detected_fp": fp, "mapped_slot": mapped_slot,
+            "expected_keys": EXPECTED_KEYS}
 
 
 def keymap_register(slot):
@@ -158,6 +192,36 @@ def keymap_register(slot):
                            "one key and retry")
     learn_key(fp, slot)
     return fp
+
+
+def setup_status():
+    """The effective configuration right now, post env>config>default
+    precedence — what the GUI's Setup panel shows. "repos" is the RAW
+    config.json entries specifically (not the resolved ROSTER basenames),
+    so a save-without-editing round-trips a path like "~/code/rotten-apple"
+    byte for byte instead of silently collapsing it to a bare name that
+    would then resolve under repo_root instead."""
+    return {"config_path": CONFIG_PATH, "repo_root": REPO_ROOT,
+            "repos": list(_config.get("repos", [])), "key_home": KEY_HOME,
+            "key_prefix": KEY_PREFIX, "expected_keys": EXPECTED_KEYS,
+            "namespace_tag": NAMESPACE_TAG}
+
+
+def write_config(new_config):
+    """Persist the setup wizard's fields to CONFIG_PATH, atomically (tmp +
+    rename, same discipline as write_session()). Preserves
+    root_layout_repos from whatever's already on disk — an advanced field
+    neither the CLI nor GUI wizard prompts for, so silently dropping it on
+    save would be a real regression for anyone who set it by hand."""
+    merged = dict(new_config)
+    if _config.get("root_layout_repos"):
+        merged["root_layout_repos"] = _config["root_layout_repos"]
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    tmp = CONFIG_PATH + f".tmp.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(merged, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, CONFIG_PATH)
 
 
 def run(cmd, cwd=None, timeout=120, input_=None, env=None):
@@ -250,23 +314,6 @@ def release_state(path, tag, no_remote=False):
     }
 
 
-# REPO-STANDARD.md (2026-07-27) moved VERSION and release-signing/ under
-# packaging/. The straddle that read both layouts while the rollout was in
-# flight is GONE as of 0.6.0 — every repo REPO-STANDARD covers converged
-# 2026-08-01 (gestalt last, fa2297a). ONE repo was never in that set at all:
-# rotten-apple is a Rust workspace outside alfred's charter (Ra's house),
-# has no VERSION file ever — version comes from Cargo.toml's
-# [workspace.package] — and its anchor sits at the pre-convergence root
-# location BY DESIGN, not by lag (ruling 23d9e8e4, 2026-08-01: mudra's own
-# roster is wider than any one coordinator's charter, and that gap had
-# never been written down before it silently blinded a real armed anchor).
-# A NAMED exception, not a generic dual-layout probe: a probe asserts any
-# repo might be on either layout, which is what made that blinding silent.
-# If rotten-apple ever adopts packaging/, remove it from this set in the
-# SAME pass, or mudra goes blind in the opposite direction.
-_ROOT_LAYOUT_REPOS = {"rotten-apple"}
-
-
 def _on_packaging_layout(path):
     return os.path.exists(os.path.join(path, "packaging", "VERSION"))
 
@@ -277,7 +324,7 @@ def version_path(path):
 
 def anchor_file(path):
     name = os.path.basename(path.rstrip("/"))
-    if name in _ROOT_LAYOUT_REPOS:
+    if name in ROOT_LAYOUT_REPOS:
         return os.path.join(path, "release-signing", "allowed_signers")
     return os.path.join(path, "packaging", "release-signing", "allowed_signers")
 
@@ -315,7 +362,7 @@ def repo_state(name, no_remote=False):
     st["dirty"] = bool(out.strip()) if rc == 0 else None
 
     name_base = os.path.basename(path.rstrip("/"))
-    if name_base not in _ROOT_LAYOUT_REPOS and not _on_packaging_layout(path):
+    if name_base not in ROOT_LAYOUT_REPOS and not _on_packaging_layout(path):
         # Matches neither the packaging/ layout nor the named root-layout
         # exception — a repo the desk doesn't recognize the shape of. Fail
         # LOUDLY (a distinct, visibly-wrong value) rather than silently
@@ -389,7 +436,7 @@ def audit(no_remote=True):
             continue
         if st["anchor"] == "unrecognized-layout":
             findings.append((n, "matches neither packaging/ layout nor a named "
-                             "root-layout exception (_ROOT_LAYOUT_REPOS) — "
+                             "root-layout exception (ROOT_LAYOUT_REPOS) — "
                              "investigate before trusting anchor=none"))
             continue
         if st["anchor"] == "armed":
@@ -421,13 +468,13 @@ def sync_signers(name, dry=False):
         raise SystemExit(f"refusing: {len(pubs)} canonical pubs, expected {EXPECTED_KEYS}")
     path = ROSTER.get(name, os.path.join(REPO_ROOT, name))
     principal = name.lower()
+    namespaces = f"{principal}-release" + (f",{NAMESPACE_TAG}" if NAMESPACE_TAG else "")
     lines = []
     for p in pubs:
         parts = p.split()
         keytype, blob = parts[0], parts[1]
         comment = parts[2] if len(parts) > 2 else "master"
-        lines.append(f'{principal} namespaces="{principal}-release,pills-tag" '
-                     f"{keytype} {blob} {comment}")
+        lines.append(f'{principal} namespaces="{namespaces}" {keytype} {blob} {comment}')
     body = "\n".join(lines)
     anchor_path = anchor_file(path)
     if dry:
@@ -590,7 +637,7 @@ class Ceremony:
             else:
                 self.say("zenity missing — PIN falls back to the serve terminal; "
                          "signing — TOUCH YOUR KEY NOW")
-            sign_key = (os.path.join(KEY_HOME, f"id_asuramaya_master_{key_n}")
+            sign_key = (os.path.join(KEY_HOME, f"id_{KEY_PREFIX}_{key_n}")
                         if key_n else SIGN_KEY)
             self.say(f"signing with handle {os.path.basename(sign_key)}")
             rc, _, err = run(["ssh-keygen", "-Y", "sign",
@@ -661,7 +708,7 @@ class Ceremony:
         if slot not in range(1, EXPECTED_KEYS + 1):
             raise RuntimeError(f"slot must be 1..{EXPECTED_KEYS}")
         os.makedirs(KEY_HOME, exist_ok=True)
-        priv = os.path.join(KEY_HOME, f"id_asuramaya_master_{slot}")
+        priv = os.path.join(KEY_HOME, f"id_{KEY_PREFIX}_{slot}")
         pub = priv + ".pub"
         if os.path.exists(pub) and not force:
             raise RuntimeError(f"slot {slot} already has a key — this refuses "
@@ -681,9 +728,10 @@ class Ceremony:
             for f in (priv, pub):
                 if os.path.exists(f):
                     os.remove(f)
+            rp_id = f"{KEY_PREFIX.replace('_', '-')}-{slot}"
             rc, out, err = run(["ssh-keygen", "-t", "ed25519-sk", "-O", "resident",
-                               "-O", f"application=ssh:asuramaya-master-{slot}",
-                               "-N", "", "-C", f"asuramaya-master-{slot}", "-f", priv],
+                               "-O", f"application=ssh:{rp_id}",
+                               "-N", "", "-C", rp_id, "-f", priv],
                                timeout=120, env=env)
             if rc:
                 raise RuntimeError(f"generation failed: {err or out}")
@@ -752,6 +800,15 @@ select.det { background-color:color-mix(in srgb,var(--good) 25%,transparent);
              color:var(--good); border-color:var(--good); }
 select.unk { background-color:color-mix(in srgb,var(--warn) 20%,transparent);
              color:var(--warn); border-color:var(--warn); }
+input[type=text], input[type=number], input:not([type]) {
+  background:#333; color:var(--fg); border:1px solid #555; border-radius:8px;
+  padding:.35em .6em; font-size:.9em; font-family:inherit; }
+.card.setupfield { align-items:center; }
+.card.setupfield label { min-width:9em; }
+.card.setupfield input { flex:1; min-width:10em; }
+#rosterList { display:flex; flex-wrap:wrap; gap:.4em; width:100%; }
+#rosterList .chip button { margin-left:.4em; background:transparent; color:inherit;
+                           border:0; padding:0; font-weight:700; cursor:pointer; }
 #log { background:#111; border-radius:10px; padding:.8rem 1rem; font:13px/1.6 monospace;
        white-space:pre-wrap; display:none; }
 #touch { display:none; text-align:center; font-size:1.5em; color:var(--warn);
@@ -763,15 +820,12 @@ footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
   <h1>mudra</h1>
   <div class="keypicker">
     <label for="keysel">key plugged in</label>
-    <select id="keysel">
-      <option value="1">Key 1</option>
-      <option value="2">Key 2</option>
-      <option value="3">Key 3</option>
-      <option value="4">Key 4</option>
-    </select>
+    <select id="keysel"></select>
     <button id="keysBtn" class="ghost">manage keys</button>
+    <button id="setupBtn" class="ghost">setup</button>
   </div>
 </div>
+<div id="setuppanel" style="display:none"></div>
 <div id="keypanel" style="display:none"></div>
 <div id="touch">TOUCH YOUR KEY NOW</div>
 <div id="repos">scanning releases…</div>
@@ -780,8 +834,22 @@ footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
 <script>
 const chip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
 const keysel=document.getElementById('keysel');
-keysel.value=localStorage.getItem('mudraKey')||'1';
 keysel.onchange=()=>localStorage.setItem('mudraKey',keysel.value);
+let keyOptionsBuilt=false;
+function ensureKeyOptions(n){
+  // Built once, from the server's own expected_keys — the <select> used to
+  // ship with 4 hardcoded <option> tags, wrong for anyone configured for a
+  // different signer count.
+  if(keyOptionsBuilt || !n) return;
+  keyOptionsBuilt=true;
+  for(let i=1;i<=n;i++){
+    const o=document.createElement('option');
+    o.value=i; o.textContent='Key '+i;
+    keysel.appendChild(o);
+  }
+  const saved=localStorage.getItem('mudraKey');
+  keysel.value=(saved && +saved>=1 && +saved<=n) ? saved : '1';
+}
 function paintKeysel(detected,detectedFp){
   // Three states, not two: a confirmed slot (green), a device that's
   // physically connected but never registered to any slot (amber — this
@@ -878,8 +946,65 @@ async function refreshKeys(){
     pollLog();
   });
 }
+const setupBtn=document.getElementById('setupBtn');
+const setuppanel=document.getElementById('setuppanel');
+setupBtn.onclick=async()=>{
+  const opening=setuppanel.style.display==='none';
+  setuppanel.style.display=opening?'block':'none';
+  setupBtn.textContent=opening?'hide setup':'setup';
+  if(opening) await refreshSetup();
+};
+async function refreshSetup(){
+  const r=await fetch('/api/setup'); const cfg=await r.json();
+  const field=(id,label,value,type)=>
+    `<div class="card setupfield"><label for="${id}">${label}</label>`+
+    `<input id="${id}" type="${type||'text'}" value="${value}"></div>`;
+  let html=`<div class="card"><b>config file</b><span class="fp">${cfg.config_path}</span></div>`;
+  html+=field('cfgRepoRoot','repo root',cfg.repo_root);
+  html+=field('cfgKeyHome','key home',cfg.key_home);
+  html+=field('cfgKeyPrefix','key prefix',cfg.key_prefix);
+  html+=field('cfgExpectedKeys','expected keys',cfg.expected_keys,'number');
+  html+=field('cfgNamespaceTag','namespace tag',cfg.namespace_tag);
+  html+=`<div class="card"><b>roster</b><div id="rosterList"></div>`+
+        `<input id="addRepoInput" placeholder="repo name or path">`+
+        `<button id="addRepoBtn" class="ghost">add</button></div>`;
+  html+=`<button id="saveSetupBtn">SAVE</button>`;
+  setuppanel.innerHTML=html;
+  let roster=cfg.repos.slice();
+  function renderRoster(){
+    document.getElementById('rosterList').innerHTML=roster.length
+      ? roster.map((r,i)=>`<span class="chip dimc">${r}<button data-i="${i}">×</button></span>`).join('')
+      : `<span class="fp">empty — add at least one below</span>`;
+    setuppanel.querySelectorAll('#rosterList button').forEach(b=>b.onclick=()=>{
+      roster.splice(parseInt(b.dataset.i),1); renderRoster();
+    });
+  }
+  renderRoster();
+  document.getElementById('addRepoBtn').onclick=()=>{
+    const inp=document.getElementById('addRepoInput');
+    const v=inp.value.trim();
+    if(v){ roster.push(v); inp.value=''; renderRoster(); }
+  };
+  document.getElementById('saveSetupBtn').onclick=async()=>{
+    const body={
+      repo_root: document.getElementById('cfgRepoRoot').value.trim(),
+      repos: roster,
+      key_home: document.getElementById('cfgKeyHome').value.trim(),
+      key_prefix: document.getElementById('cfgKeyPrefix').value.trim(),
+      expected_keys: parseInt(document.getElementById('cfgExpectedKeys').value) || 1,
+      namespace_tag: document.getElementById('cfgNamespaceTag').value.trim(),
+    };
+    const r2=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    const d2=await r2.json();
+    if(d2.error){ alert('Save failed: '+d2.error); return; }
+    alert('Saved to '+cfg.config_path+'. Roster/key settings load once at '+
+          'startup — restart mudra serve to pick this up.');
+  };
+}
 async function refresh(){
   const r=await fetch('/api/status'); const d=await r.json();
+  ensureKeyOptions(d.expected_keys);
   paintKeysel(d.detected, d.detected_fp);
   const el=document.getElementById('repos'); el.innerHTML='';
   for(const s of d.repos){
@@ -962,7 +1087,7 @@ def polkit_authorize():
     Fails CLOSED on a real denial (wrong password, cancelled dialog, timeout)
     — that is the entire point. Fails OPEN, loudly, only when polkit itself
     or this action isn't installed yet (pkcheck missing, or the .policy file
-    from src/polkit/com.asuramaya.mudra.policy hasn't been copied into
+    from src/polkit/com.mudra.open-desk.policy hasn't been copied into
     /usr/share/polkit-1/actions/ — that install step needs root and is never
     mudra's to take), so a fresh checkout degrades to token-only instead of
     locking the desk before its first `make install-polkit`."""
@@ -1040,7 +1165,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # included.
             self._send(json.dumps({"repos": scan(),
                                    "detected": load_keymap().get(fp) if fp else None,
-                                   "detected_fp": fp}))
+                                   "detected_fp": fp,
+                                   "expected_keys": EXPECTED_KEYS}))
         elif p == "/api/log":
             self._send(json.dumps({"log": CEREMONY.log, "done": CEREMONY.done,
                                    "active": CEREMONY.active}))
@@ -1058,6 +1184,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(json.dumps({"keys": keys}))
         elif p == "/api/keysetup/status":
             self._send(json.dumps(keyslot_status()))
+        elif p == "/api/setup":
+            self._send(json.dumps(setup_status()))
         else:
             self._send('{"error":"not found"}', code=404)
 
@@ -1066,21 +1194,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send('{"error":"unauthorized"}', code=401)
         path = urllib.parse.urlparse(self.path).path
         if path not in ("/api/arm", "/api/seal", "/api/keysetup/generate",
-                        "/api/keysetup/map"):
+                        "/api/keysetup/map", "/api/setup"):
             return self._send('{"error":"not found"}', code=404)
         try:
             n = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(min(n, 4096)) or "{}")
+            if path == "/api/setup":
+                repos = req.get("repos")
+                if not isinstance(repos, list) or not all(isinstance(r, str) for r in repos):
+                    return self._send('{"error":"repos must be a list of strings"}', code=400)
+                expected_keys = req.get("expected_keys")
+                if not isinstance(expected_keys, int) or expected_keys < 1:
+                    return self._send(
+                        '{"error":"expected_keys must be a positive integer"}', code=400)
+                write_config({
+                    "repo_root": str(req.get("repo_root", "")),
+                    "repos": repos,
+                    "key_home": str(req.get("key_home", "")),
+                    "key_prefix": str(req.get("key_prefix", "")),
+                    "expected_keys": expected_keys,
+                    "namespace_tag": str(req.get("namespace_tag", "")),
+                })
+                return self._send('{"ok":true}')
             if path == "/api/keysetup/map":
                 slot = req.get("slot")
-                if slot not in (1, 2, 3, 4):
-                    return self._send('{"error":"slot must be 1-4"}', code=400)
+                if slot not in range(1, EXPECTED_KEYS + 1):
+                    return self._send(json.dumps(
+                        {"error": f"slot must be 1-{EXPECTED_KEYS}"}), code=400)
                 fp = keymap_register(slot)
                 return self._send(json.dumps({"ok": True, "fingerprint": fp}))
             if path == "/api/keysetup/generate":
                 slot = req.get("slot")
-                if slot not in (1, 2, 3, 4):
-                    return self._send('{"error":"slot must be 1-4"}', code=400)
+                if slot not in range(1, EXPECTED_KEYS + 1):
+                    return self._send(json.dumps(
+                        {"error": f"slot must be 1-{EXPECTED_KEYS}"}), code=400)
                 threading.Thread(target=CEREMONY.keysetup,
                                  args=(slot, bool(req.get("force"))),
                                  daemon=True).start()
@@ -1093,8 +1240,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                  daemon=True).start()
             else:
                 key_n = req.get("key")
-                if key_n is not None and key_n not in (1, 2, 3, 4):
-                    return self._send('{"error":"key must be 1-4"}', code=400)
+                if key_n is not None and key_n not in range(1, EXPECTED_KEYS + 1):
+                    return self._send(json.dumps(
+                        {"error": f"key must be 1-{EXPECTED_KEYS}"}), code=400)
                 threading.Thread(target=CEREMONY.seal, args=(name, key_n),
                                  daemon=True).start()
             self._send('{"ok":true}')
@@ -1106,7 +1254,68 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 # --------------------------------------------------------------------- CLI
 
+def cli_init(args):
+    """Interactive setup: configure YOUR OWN roster, key home, and signing
+    conventions instead of inheriting anyone else's. Re-runnable — every
+    prompt shows the current value (from config, or an already-set env var)
+    as its default, so running this again is how you EDIT, not just how
+    you START."""
+    print("mudra setup — press enter to keep the value shown in [brackets].\n")
+
+    def ask(prompt, current):
+        val = input(f"{prompt} [{current}]: ").strip()
+        return val or current
+
+    repo_root = ask("Where do your repos live?",
+                    _config.get("repo_root", os.path.join(HOME, "code", "REPOS")))
+
+    existing = _config.get("repos", [])
+    repos = None
+    if existing:
+        print(f"\nCurrent roster: {', '.join(existing)}")
+        if input("Keep this roster as-is? [Y/n]: ").strip().lower() not in ("n", "no"):
+            repos = list(existing)
+    if repos is None:
+        print("\nWhich repos should mudra track? One at a time — a name under the "
+              "repo root above, or a full path (\"mudra\" tracks mudra itself, "
+              "same as anything else). Blank line when done.")
+        repos = []
+        while True:
+            entry = input("  repo: ").strip()
+            if not entry:
+                break
+            repos.append(entry)
+
+    key_home = ask("\nWhere should the canonical key home live?",
+                    _config.get("key_home", os.path.join(HOME, ".ssh", "mudra-master")))
+    key_prefix = ask("Key file/naming prefix (files become id_<prefix>_N)",
+                      _config.get("key_prefix", "master"))
+    expected_keys = int(ask("How many signing keys (quorum size)?",
+                            _config.get("expected_keys", 4)))
+    namespace_tag = ask("Extra namespace tag on every anchor line (blank for none)",
+                        _config.get("namespace_tag", ""))
+
+    new_config = {
+        "repo_root": repo_root, "repos": repos, "key_home": key_home,
+        "key_prefix": key_prefix, "expected_keys": expected_keys,
+        "namespace_tag": namespace_tag,
+    }
+    if _config.get("root_layout_repos"):
+        new_config["root_layout_repos"] = _config["root_layout_repos"]
+
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(new_config, f, indent=2)
+        f.write("\n")
+    print(f"\nWrote {CONFIG_PATH}. Restart \"mudra serve\" (or just run "
+          "\"mudra status\") to pick it up — the roster and key settings are "
+          "read once, at startup, not live.")
+
+
 def cli_status(args):
+    if not ROSTER:
+        raise SystemExit("no repos configured — run `mudra init` to set up "
+                         "your roster (or set MUDRA_REPOS for a one-off run)")
     no_remote = "--no-remote" in args
     states = scan(no_remote)
     if "--json" in args:
@@ -1119,6 +1328,9 @@ def cli_status(args):
 
 
 def cli_audit(args):
+    if not ROSTER:
+        raise SystemExit("no repos configured — run `mudra init` to set up "
+                         "your roster (or set MUDRA_REPOS for a one-off run)")
     states, findings = audit(no_remote="--remote" not in args)
     for s in states:
         ver = s.get("version") or "?"
@@ -1187,15 +1399,17 @@ def cli_open(args):
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
-        print(__doc__ or "mudra status|audit|sync-signers <repo> [--dry]|"
+        print(__doc__ or "mudra init|status|audit|sync-signers <repo> [--dry]|"
               "arm <repo>|seal <repo>|keysetup|serve [--port N]|open")
-        print("mudra status [--json] [--no-remote] · audit [--remote] · "
+        print("mudra init · status [--json] [--no-remote] · audit [--remote] · "
               "sync-signers <repo> [--dry] · arm <repo> · seal <repo> [--key N] · "
               "keysetup [--slot N [--force]] [--map N] · "
               "serve [--port N] · open [--print]")
         return
     cmd, rest = args[0], args[1:]
-    if cmd == "status":
+    if cmd == "init":
+        cli_init(rest)
+    elif cmd == "status":
         cli_status(rest)
     elif cmd == "audit":
         cli_audit(rest)

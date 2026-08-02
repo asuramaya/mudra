@@ -4,9 +4,9 @@
  "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
 <policyconfig>
 
-  <vendor>asuramaya</vendor>
+  <vendor>mudra</vendor>
 
-  <action id="com.asuramaya.mudra.open-desk">
+  <action id="com.mudra.open-desk">
     <description>Open the mudra seal desk</description>
     <message>Authenticate to open the release seal desk</message>
     <defaults>

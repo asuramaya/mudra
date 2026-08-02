@@ -1,0 +1,44 @@
+# mudra desk (the seal desk) — systemd USER unit.
+#
+# Serves the localhost ceremony GUI at http://127.0.0.1:7770 (host is hardcoded
+# in src/bin/mudra, never LAN — no env override exists). Needs the graphical
+# session because the seal/arm ceremony shells to zenity for the FIDO2 PIN
+# prompt and to ssh-keygen -Y for your own hardware-key touch; mudra itself
+# never holds key material.
+#
+# Install: `make install-service` fills in the real checkout path below and
+# runs daemon-reload + enable --now. Manual equivalent, from an already-
+# templated copy of this file in ~/.config/systemd/user/mudra.service:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now mudra
+# Token: each boot mints a fresh one-boot session token to stdout — read it
+# with `journalctl --user -u mudra -n 20` after (re)start, then the URL's
+# cookie carries you after the first visit.
+[Unit]
+Description=mudra desk — the release seal desk (127.0.0.1:7770)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=__MUDRA_DIR__
+ExecStart=/usr/bin/python3 -u __MUDRA_DIR__/src/bin/mudra serve
+Restart=on-failure
+RestartSec=2
+# A clean `systemctl --user stop` is not a failure — Restart=on-failure does
+# NOT resurrect a deliberate stop, matching gestalt's panic-kill semantics.
+TimeoutStopSec=5
+KillMode=control-group
+
+# Cheap hardening for a loopback-only, single-operator desk. Needs AF_INET/
+# AF_INET6 (git push/gh release calls) and AF_UNIX (X11/Wayland + D-Bus for
+# zenity's PIN prompt) — no PrivateDevices, the FIDO2 key is accessed via the
+# operator's own udev-granted device permissions, same as any CLI ssh-keygen use.
+NoNewPrivileges=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=graphical-session.target

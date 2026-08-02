@@ -57,7 +57,12 @@ mkdir -p "$T/repos/fakeunknown"
 ( cd "$T/repos/fakeunknown" && git init -q . && echo 0.1.0 > VERSION \
   && git add -A && git -c user.email=s@s -c user.name=s commit -qm x )
 
-ENV="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakepill,fakepackaged,rotten-apple,fakeunknown MUDRA_KEY_HOME=$T/keys"
+# MUDRA_CONFIG_PATH points at a path that never exists, on every env string
+# in this file: without it, any of these calls would fall through to this
+# machine's REAL ~/.config/mudra/config.json (roster, namespace tag, etc.)
+# for whatever this fixture's env doesn't explicitly override — silently
+# contaminating a fixture-only test with real local configuration.
+ENV="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakepill,fakepackaged,rotten-apple,fakeunknown MUDRA_KEY_HOME=$T/keys MUDRA_ROOT_LAYOUT_REPOS=rotten-apple MUDRA_NAMESPACE_TAG=pills-tag MUDRA_CONFIG_PATH=$T/no-config.json"
 
 # status --no-remote --json names the repo and derives a state
 out="$(env $ENV "$MUDRA" status --no-remote --json)" \
@@ -88,23 +93,20 @@ out="$(env $ENV "$MUDRA" status --no-remote --json)" \
   && say "named exception: rotten-apple's root-layout anchor reads armed ok" \
   || die "rotten-apple's root anchor was not read as armed"
 
-# NEGATIVE CONTROL: same repo, named exception removed from a throwaway
-# copy of the script -> must NOT read armed. A green positive alone can't
-# tell "the carve-out works" from "something else resolved it"; this is
-# the other half of the proof. The copy has to live beside the real script
-# (never AS the real script — removed in the same breath) so its own
-# _self_path/packaging-VERSION self-read still resolves; a copy dropped in
-# an unrelated scratch dir fails before it even reaches the code under test.
-NEGCTRL="$HERE/src/bin/mudra_negctrl.py"
-sed 's/_ROOT_LAYOUT_REPOS = {"rotten-apple"}/_ROOT_LAYOUT_REPOS = set()/' "$MUDRA" > "$NEGCTRL"
+# NEGATIVE CONTROL: same repo, root-layout exception NOT configured this
+# time (MUDRA_ROOT_LAYOUT_REPOS simply omitted) -> must NOT read armed. A
+# green positive alone can't tell "the carve-out works" from "something
+# else resolved it"; this is the other half of the proof. Now that the
+# exception set is config/env-driven rather than a hardcoded literal, the
+# negative control is just running with it unset — no sed'd throwaway copy
+# of the script needed.
 out="$(env MUDRA_REPO_ROOT="$T/repos" MUDRA_REPOS=rotten-apple MUDRA_KEY_HOME="$T/keys" \
-       python3 "$NEGCTRL" status --no-remote --json)"
-rm -f "$NEGCTRL"
+       MUDRA_CONFIG_PATH="$T/no-config.json" "$MUDRA" status --no-remote --json)"
 echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); \
    r=[x for x in d['repos'] if x['name']=='rotten-apple'][0]; \
    sys.exit(0 if r['anchor']=='unrecognized-layout' else 1)" \
-  && say "negative control: removing the exception flips rotten-apple away from armed ok" \
-  || die "negative control: rotten-apple stayed armed with the exception removed — carve-out isn't load-bearing"
+  && say "negative control: without the exception configured, rotten-apple reads unrecognized-layout ok" \
+  || die "negative control: rotten-apple stayed armed with the exception unconfigured — carve-out isn't load-bearing"
 
 # FAIL LOUD: a repo matching neither shape must not silently read anchor=none
 out="$(env $ENV "$MUDRA" status --no-remote --json)" \
@@ -128,7 +130,7 @@ grep -q 'fakepill-release' "$T/repos/fakepill/install.sh" \
 # audit: armed fixture matching its own canon must be CLEAN (drop the
 # unrecognized/rotten-apple fixtures from the roster for this check — they
 # are exercised above on their own terms)
-ENV2="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakepill,fakepackaged MUDRA_KEY_HOME=$T/keys"
+ENV2="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakepill,fakepackaged MUDRA_KEY_HOME=$T/keys MUDRA_CONFIG_PATH=$T/no-config.json"
 env $ENV2 "$MUDRA" audit >/dev/null 2>&1 \
   && say "audit: clean on coherent fixture" || die "audit rc on coherent fixture"
 
@@ -155,6 +157,14 @@ else
   die "fresh anchor landed at the wrong path"
 fi
 
+# namespace has no forced second tag when MUDRA_NAMESPACE_TAG isn't
+# configured (ENV2 doesn't set it) — the old hardcoded ",pills-tag" is gone,
+# a stranger's anchor shouldn't carry a family tag they never asked for
+grep -q 'fakepackaged namespaces="fakepackaged-release" ' \
+     "$T/repos/fakepackaged/packaging/release-signing/allowed_signers" \
+  && say "sync-signers: namespace carries no unconfigured tag ok" \
+  || die "namespace included a tag that was never configured"
+
 # ARM CEREMONY (`mudra arm <repo>`, the standalone act split out from seal):
 # writes the anchor, then a SCOPED commit, then push — needs a real git
 # remote to prove the push actually happened, not just assume it. A local
@@ -176,7 +186,7 @@ git init -q --bare -b main "$BARE"
 # all day; it is NOT fine for a hermetic test, which must not assume the
 # runner has any global git identity at all (CI doesn't, and the smoke
 # suite caught exactly that gap the first time it actually ran on one).
-ENV3="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm MUDRA_KEY_HOME=$T/keys GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=s@s GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=s@s"
+ENV3="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm MUDRA_KEY_HOME=$T/keys MUDRA_CONFIG_PATH=$T/no-config.json GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=s@s GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=s@s"
 arm_out="$(env $ENV3 "$MUDRA" arm fakearm 2>&1)"
 rc=$?
 if [ "$rc" = 0 ] \
@@ -207,7 +217,7 @@ git init -q --bare -b main "$BARE2"
   && git remote add origin "$BARE2" \
   && git push -q -u origin main )
 rm -f "$T/keys/id_fake_4.pub"
-ENV4="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm2 MUDRA_KEY_HOME=$T/keys GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=s@s GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=s@s"
+ENV4="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=fakearm2 MUDRA_KEY_HOME=$T/keys MUDRA_CONFIG_PATH=$T/no-config.json GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=s@s GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=s@s"
 out="$(env $ENV4 "$MUDRA" arm fakearm2 2>&1)"
 rc=$?
 if [ "$rc" != 0 ] && echo "$out" | grep -qi "refusing\|expected"; then
@@ -220,10 +230,11 @@ for i in 1 2 3 4; do
     > "$T/keys/id_fake_$i.pub" 2>/dev/null
 done
 
-# KEY SETUP WIZARD: keysetup's own scan (id_asuramaya_master_N — a fixed
-# family naming convention, unrelated to whatever names sit in a MUDRA_KEY_HOME
-# used for arming/sealing above) needs its own, separate, initially-empty
-# key home.
+# KEY SETUP WIZARD: keysetup's own key-file naming is MUDRA_KEY_PREFIX-driven
+# (id_<prefix>_N — set explicitly below, not left at whatever the default
+# happens to be, so this test stays correct regardless of default drift),
+# unrelated to whatever names sit in a MUDRA_KEY_HOME used for arming/
+# sealing above. Needs its own, separate, initially-empty key home.
 mkdir -p "$T/bin"
 REAL_SSH_KEYGEN="$(command -v ssh-keygen)"
 # Real hardware (-t ed25519-sk) can't exist in a sandbox and can't be
@@ -255,7 +266,7 @@ chmod +x "$T/bin/ssh-keygen"
 # ever calls learn_key() (arm/sync-signers never touch it), and on any
 # machine with a real hardware key plugged in, an unsandboxed run would
 # silently map that real device to this test's throwaway slot.
-ENV5="MUDRA_KEY_HOME=$T/keys3 MUDRA_KEYMAP_PATH=$T/keymap.json PATH=$T/bin:$PATH"
+ENV5="MUDRA_KEY_HOME=$T/keys3 MUDRA_KEYMAP_PATH=$T/keymap.json MUDRA_KEY_PREFIX=fake_master MUDRA_CONFIG_PATH=$T/no-config.json PATH=$T/bin:$PATH"
 
 # fresh key home: not on disk yet, every slot reads empty rather than erroring
 out="$(env $ENV5 "$MUDRA" keysetup 2>&1)"
@@ -266,12 +277,20 @@ echo "$out" | grep -q "MISSING" && [ "$(echo "$out" | grep -c 'slot .: empty')" 
 # generate into an empty slot
 out="$(env $ENV5 "$MUDRA" keysetup --slot 1 2>&1)"
 rc=$?
-if [ "$rc" = 0 ] && [ -s "$T/keys3/id_asuramaya_master_1.pub" ] \
-   && [ -e "$T/keys3/id_asuramaya_master_1" ]; then
-  say "keysetup: generates a fresh slot ok"
+if [ "$rc" = 0 ] && [ -s "$T/keys3/id_fake_master_1.pub" ] \
+   && [ -e "$T/keys3/id_fake_master_1" ]; then
+  say "keysetup: generates a fresh slot ok (respects MUDRA_KEY_PREFIX)"
 else
   die "keysetup --slot 1 didn't provision (rc=$rc): $out"
 fi
+
+# RP-ID/comment derives from KEY_PREFIX with underscores turned to hyphens
+# (id_fake_master_1's file stem keeps the underscore; the FIDO2
+# application/comment convention uses hyphens) — the one place the prefix
+# is rendered two different ways from the same config value.
+grep -q ' fake-master-1$' "$T/keys3/id_fake_master_1.pub" \
+  && say "keysetup: RP-ID/comment derives fake-master-1 from prefix fake_master ok" \
+  || die "RP-ID/comment didn't derive correctly from MUDRA_KEY_PREFIX: $(cat "$T/keys3/id_fake_master_1.pub")"
 
 # refuses to clobber an occupied slot without --force
 out="$(env $ENV5 "$MUDRA" keysetup --slot 1 2>&1)"

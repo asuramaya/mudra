@@ -1,18 +1,21 @@
 name: signing-sync
-# Enforces RELEASE.md's sync-signers invariant: packaging/release-signing/
-# allowed_signers must always be either (a) empty — the pre-arming shipping
-# state, verification inert — or (b) exactly 4 well-formed lines. "Same 4
-# keys everywhere" is a CHECKED invariant here, not a convention. No embedded
-# install.sh twin to compare — mudra has none (docs/ARCHITECTURE.md's
-# Standard exemptions table) — so this check is shorter than a pill's by
-# exactly that section.
+# Enforces the sync-signers invariant on mudra's OWN anchor: packaging/
+# release-signing/allowed_signers must always be either (a) empty — the
+# pre-arming shipping state, verification inert — or (b) well-formed lines
+# that all agree with each other. "Same anchor everywhere on the line" is a
+# CHECKED invariant here, not a convention. No embedded install.sh twin to
+# compare — mudra has none (docs/ARCHITECTURE.md's Standard exemptions
+# table) — so this check is shorter than a pill's by exactly that section.
 #
-# The canonical key home is ~/.ssh/asuramaya-master/ on the operator's own
-# machine (ruling 13ee52ce) — outside every repo, never committed, never
-# reachable by a CI runner. So this check is deliberately INTERNAL-CONSISTENCY
-# ONLY: it can confirm the anchor is well-formed, but it cannot confirm it
-# still matches the operator's actual canonical keys — that comparison only
-# ever happens locally, via `make sync-signers` itself.
+# The canonical key home lives wherever your own `mudra init` (or
+# MUDRA_KEY_HOME) points — outside every repo, never committed, never
+# reachable by a CI runner. So this check is deliberately INTERNAL-
+# CONSISTENCY ONLY: it can confirm the anchor is well-formed, but it cannot
+# confirm it still matches your actual canonical keys — that comparison
+# only ever happens locally, via `make sync-signers` itself. It also can't
+# know how many keys you've configured (EXPECTED_KEYS) or what namespace
+# tag you use, so it checks structure and internal agreement, not exact
+# counts or a hardcoded namespace string.
 
 on:
   push:
@@ -39,13 +42,15 @@ jobs:
 
           print("anchor is ARMED — checking internal consistency.")
           lines = [ln for ln in anchor.split("\n") if ln.strip()]
-          if len(lines) != 4:
-              sys.exit(f"expected exactly 4 lines in allowed_signers, found {len(lines)}")
           line_re = re.compile(
-              r'^mudra namespaces="mudra-release,pills-tag" '
+              r'^mudra namespaces="mudra-release(?:,\S+)?" '
               r'\S+ \S+ \S+$')
+          namespaces = set()
           for ln in lines:
               if not line_re.match(ln):
                   sys.exit(f"malformed allowed_signers line: {ln!r}")
-          print("4 well-formed lines OK")
+              namespaces.add(re.search(r'namespaces="([^"]+)"', ln).group(1))
+          if len(namespaces) != 1:
+              sys.exit(f"anchor lines disagree on namespace: {sorted(namespaces)}")
+          print(f"{len(lines)} well-formed line(s), consistent namespace, OK")
           PYEOF

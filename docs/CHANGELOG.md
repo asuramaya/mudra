@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.9.0 — a product for strangers, not just this repo (2026-08-02)
+
+mudra was built as this operator's own bespoke tool, and it looked like one: a hardcoded
+roster of THIS family's own repo names, `~/.ssh/asuramaya-master` baked into path defaults,
+`id_asuramaya_master_N` key naming fixed at the code level (not just a default), a fixed
+4-signer count, a `,pills-tag` namespace segment nobody else would want, a polkit action ID
+and desktop launcher carrying one person's name, and a systemd unit that was never even
+checked into the repo — hand-set-up on this one machine, undocumented anywhere a stranger
+could find it. A full-file audit found dozens of instances; all fixed in this pass.
+
+**Config layer**: `~/.config/mudra/config.json` (same footing as keymap.json — local,
+personal, never committed) now holds the roster, repo root, key home, key naming prefix,
+expected key count, and namespace tag. Precedence is env var > config file > generic
+fallback, matching the `MUDRA_KEY_HOME`-style overrides that already existed. Fallback
+defaults are genuinely generic now: `key_home` defaults to `~/.ssh/mudra-master`, not
+`asuramaya-master`; the roster defaults to **empty** — nothing tracked until you configure
+it, never someone else's project names; `key_prefix` defaults to `master`. The one exception
+is `expected_keys` (default 4) — a reasonable redundancy default worth keeping, not an
+identity leak. `mudra init` (CLI, interactive, re-runnable — shows current values as
+defaults) and a new **setup** panel in the GUI header (mirrors `keysetup`'s polish: repo
+root/key home/key prefix/expected keys/namespace tag as editable fields, roster as an
+add/remove list) both write this file.
+
+**Every hardcoded `id_asuramaya_master_N` / `asuramaya-master-N`** — the seal ceremony's
+`SIGN_KEY`, the keysetup wizard's generated file names, and its FIDO2 `-O application=`/`-C`
+RP-ID/comment — now derives from `KEY_PREFIX` (file stem keeps underscores; the RP-ID/comment
+convention turns them to hyphens, so `key_prefix=asuramaya_master` still reconstructs
+`asuramaya-master-N` exactly for this operator's own already-armed keys). `EXPECTED_KEYS`
+is a runtime value everywhere it used to be a literal 4, including the header key-picker's
+`<option>` list (now built from the server's own `expected_keys`, not hardcoded to four).
+The `,pills-tag` namespace segment is gone by default; `sync_signers()` emits just
+`"{repo}-release"` unless `MUDRA_NAMESPACE_TAG`/config sets one.
+
+**Removed entirely, not generalized** (no version of these makes sense for a stranger):
+the `_ROOT_LAYOUT_REPOS = {"rotten-apple"}` hardcoded named exception became a config-driven
+`ROOT_LAYOUT_REPOS` set, empty by default — your own non-`packaging/`-layout repo is your own
+config entry, not a fact about this family baked into the shipped source. The "sutra is
+deliberately NOT here" comment block is gone along with it — it explained an absence from a
+hardcoded list that no longer exists; the incident stays recorded in this changelog's 0.8.1
+entry. `packaging/sync-signers.sh`, a standalone script duplicating what `mudra sync-signers
+mudra` already does generically, is deleted; `make sync-signers` calls the CLI verb directly.
+
+**Two real bugs, unrelated to genericness but found in the same sweep**: `src/desktop/
+mudra.desktop`'s `Exec=` line was a literal absolute path to this one machine's checkout —
+broken for literally anyone else, and `make install-launcher` copied it verbatim with no
+templating. Now templated at install time (`__MUDRA_BIN__` substituted with the real
+checkout path). And no systemd unit file existed anywhere in the repo despite docs describing
+autostart behavior that depends on one — it had been hand-created directly on this machine and
+never checked in. Added `src/systemd/mudra.service` as a template plus a new `make
+install-service` target (folded into `make install` alongside `install-launcher`).
+
+**This family's own conventions, kept but no longer silently imposed**: `check-repo`
+(REPO-STANDARD.md's structural gate — root file count, a README nav block) still runs by
+default in `make check`/CI, since this repo still wants it enforced on itself, but
+`MUDRA_SKIP_CHECK_REPO=1` now skips it for a fork organized differently.
+`.github/workflows/signing-sync.yml`'s CI check on mudra's own anchor no longer hardcodes
+"exactly 4 lines" or the literal `,pills-tag` string — it can't know a downstream fork's
+configured key count or tag, so it checks structural well-formedness and internal
+consistency (every line agrees on the same namespace) instead.
+
+**Docs**: README.md and docs/USAGE.md rewritten to drop "the pill family" framing, broken
+cross-repo links to `../FAMILY.md`/`../RELEASE.md` (files that live outside this repo and
+were never shipped with it), and stale roster-count claims that had drifted three different
+ways across two files. Both now lead with `mudra init` as the first step. Explicit "known
+platform limits" section added: GitHub Releases and Yubico auto-detect are the only
+supported backends for now (signing itself works with any FIDO2 key; only auto-detection is
+Yubico-specific) — documented rather than silently assumed.
+`docs/ARCHITECTURE.md` and `docs/CHANGELOG.md` are deliberately untouched — this project's
+own real development history, legitimate for a maintainer-facing architecture doc and a
+changelog to document, same as any real open-source project's.
+
+This operator's own live setup kept working through all of it: `~/.config/mudra/config.json`
+was written with the exact real values (`key_prefix: asuramaya_master`, `namespace_tag:
+pills-tag`, `root_layout_repos: [rotten-apple]`, the real 8-repo roster) as the very first
+thing done here, verified byte-for-byte against `mudra status`/`audit` before touching
+anything else — the desk never went dark mid-refactor.
+
 ## 0.8.1 — sutra was never mudra's to arm (2026-08-02)
 
 Removed sutra from `DEFAULT_REPOS`. RELEASE.md:201, the family's own ratified doctrine,
