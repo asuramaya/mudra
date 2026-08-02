@@ -53,24 +53,27 @@ Access is loopback-only, one-boot-token-gated, and — once
 your fingerprint/password on your own screen before minting a
 session, on top of the token. See `src/polkit/README.md`.
 
-Every repo renders as a card: version, tag state, anchor state (armed / inert / none),
-embedded-copy drift, working-tree dirt, and the derived verdict. Arm and seal are two
-separate acts, each its own button, because they need different things: arming needs
-only the public keys and works on a repo with no tag at all; sealing needs your
-physical touch and a published release. An unarmed repo's card carries an **ARM**
-button — click it and the desk previews which keys it's about to write before an extra
-confirmation ("arming pins the master identity fail-closed *forever*"). A repo AWAITING
-SEAL carries a **SEAL** button. The ceremony streams its steps live; when it's time to
-sign, the desk lights up: TOUCH YOUR KEY NOW. After upload, mudra re-downloads
-everything and verifies hash chain + signature exactly as an end user would — sealed
-means *proven* sealed.
+Three tabs, one visible at a time — **sign**, **keys**, **setup** — instead of stacking
+panels that used to fight the always-visible queue for space.
 
-**setup**, in the header, opens the same configuration `mudra init` writes — roster, key
-home, key prefix, expected key count, namespace tag — editable from the browser, no
-terminal needed after the first run. **manage keys**, next to it, is the wizard for your
-canonical handles themselves — lower stakes than sealing, higher stakes than everything
-else on the desk. Each slot shows empty or a fingerprint, a **plugged in now** chip when
-it's the one actually detected (read-only — one physical key is ever connected at a
+**sign** (the default) is the queue itself: every repo renders as a card — version, tag
+state, anchor state (armed / inert / none), embedded-copy drift, working-tree dirt, and
+the derived verdict. Arm and seal are two separate acts, each its own button, because
+they need different things: arming needs only the public keys and works on a repo with
+no tag at all; sealing needs your physical touch and a published release. An unarmed
+repo's card carries an **ARM** button — click it and the desk previews which keys it's
+about to write before an extra confirmation ("arming pins the master identity
+fail-closed *forever*"). A repo AWAITING SEAL carries a **SEAL** button. The ceremony
+streams its steps live; when it's time to sign, the desk lights up: TOUCH YOUR KEY NOW.
+After upload, mudra re-downloads everything and verifies hash chain + signature exactly
+as an end user would — sealed means *proven* sealed.
+
+**setup** opens the same configuration `mudra init` writes — roster, key home, key
+prefix, expected key count, namespace tag — editable from the browser, no terminal
+needed after the first run. **keys** is the wizard for your canonical handles
+themselves — lower stakes than sealing, higher stakes than everything else on the desk.
+Each slot shows empty or a fingerprint, a **plugged in now** chip when it's the one
+actually detected (read-only — one physical key is ever connected at a
 time), and a **GENERATE**/**REGENERATE** button that mints a brand-new hardware-backed
 key straight onto that slot (PIN, then TOUCH). mudra still never holds key material here
 either: `-O resident` means the private half exists only on the token, never on disk.

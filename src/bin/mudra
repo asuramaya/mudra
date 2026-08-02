@@ -815,21 +815,31 @@ input[type=text], input[type=number], input:not([type]) {
          padding:.6em; border:2px dashed var(--warn); border-radius:14px; margin:.7rem 0; }
 label { color:var(--dim); font-size:.85em; }
 footer { color:var(--dim); font-size:.8em; margin-top:2rem; }
+.tabs { display:flex; gap:.4em; margin:1.2rem 0 .3rem; border-bottom:1px solid #333;
+        padding-bottom:.8rem; }
+.tab { background:transparent; color:var(--dim); border:1px solid #444; border-radius:8px;
+       padding:.45em 1.3em; font-weight:600; cursor:pointer; margin-left:0; font-size:.95em; }
+.tab.active { background:var(--accent); color:#1b1d1a; border-color:var(--accent); }
 </style></head><body>
 <div class="topbar">
   <h1>mudra</h1>
   <div class="keypicker">
     <label for="keysel">key plugged in</label>
     <select id="keysel"></select>
-    <button id="keysBtn" class="ghost">manage keys</button>
-    <button id="setupBtn" class="ghost">setup</button>
   </div>
 </div>
-<div id="setuppanel" style="display:none"></div>
+<div class="tabs">
+  <button id="tabSign" class="tab active">sign</button>
+  <button id="tabKeys" class="tab">keys</button>
+  <button id="tabSetup" class="tab">setup</button>
+</div>
+<div id="signtab">
+  <div id="touch">TOUCH YOUR KEY NOW</div>
+  <div id="repos">scanning releases…</div>
+  <pre id="log"></pre>
+</div>
 <div id="keypanel" style="display:none"></div>
-<div id="touch">TOUCH YOUR KEY NOW</div>
-<div id="repos">scanning releases…</div>
-<pre id="log"></pre>
+<div id="setuppanel" style="display:none"></div>
 <footer>v%VER%</footer>
 <script>
 const chip=(t,c)=>`<span class="chip ${c}">${t}</span>`;
@@ -864,26 +874,40 @@ function paintKeysel(detected,detectedFp){
                           +'this picker is a manual guess. Register it: keysetup --map N')
               :'no key detected — pick the one that is plugged in (manual guess, unverified)';
 }
-const keysBtn=document.getElementById('keysBtn');
 const keypanel=document.getElementById('keypanel');
 let keysPollTimer=null, lastKeysJSON=null;
-keysBtn.onclick=async()=>{
-  const opening=keypanel.style.display==='none';
-  keypanel.style.display=opening?'block':'none';
-  keysBtn.textContent=opening?'hide keys':'manage keys';
-  if(opening){
+// Three tabs, never more than one visible at once — sign (the default),
+// keys, and setup used to be a toggle button each, stacking their panels
+// alongside the always-visible repo list when more than one was open at
+// the same time. One active tab at a time instead.
+const tabPanels={sign:document.getElementById('signtab'), keys:keypanel,
+                 setup:document.getElementById('setuppanel')};
+const tabButtons={sign:document.getElementById('tabSign'), keys:document.getElementById('tabKeys'),
+                  setup:document.getElementById('tabSetup')};
+let activeTab='sign';
+async function switchTab(name){
+  if(name===activeTab) return;
+  activeTab=name;
+  for(const k in tabPanels){
+    tabPanels[k].style.display=(k===name)?'block':'none';
+    tabButtons[k].className='tab'+(k===name?' active':'');
+  }
+  if(keysPollTimer){ clearInterval(keysPollTimer); keysPollTimer=null; }
+  if(name==='keys'){
     lastKeysJSON=null;
     await refreshKeys();
     // Polls fast enough to feel live while you're physically swapping keys
     // in front of the screen — the panel used to only ever fetch once, on
-    // open, so a swap just sat there looking unchanged until you closed
-    // and reopened it.
+    // open, so a swap just sat there looking unchanged until you switched
+    // away and back.
     keysPollTimer=setInterval(refreshKeys, 2000);
-  } else if(keysPollTimer){
-    clearInterval(keysPollTimer);
-    keysPollTimer=null;
+  } else if(name==='setup'){
+    await refreshSetup();
   }
-};
+}
+tabButtons.sign.onclick=()=>switchTab('sign');
+tabButtons.keys.onclick=()=>switchTab('keys');
+tabButtons.setup.onclick=()=>switchTab('setup');
 function trimFp(fp){
   // drop the bit-length and the trailing comment — the comment already
   // shows as its own chip, repeating it next to the hash is just noise
@@ -946,14 +970,7 @@ async function refreshKeys(){
     pollLog();
   });
 }
-const setupBtn=document.getElementById('setupBtn');
 const setuppanel=document.getElementById('setuppanel');
-setupBtn.onclick=async()=>{
-  const opening=setuppanel.style.display==='none';
-  setuppanel.style.display=opening?'block':'none';
-  setupBtn.textContent=opening?'hide setup':'setup';
-  if(opening) await refreshSetup();
-};
 async function refreshSetup(){
   const r=await fetch('/api/setup'); const cfg=await r.json();
   const field=(id,label,value,type)=>
@@ -1067,7 +1084,7 @@ async function pollLog(){
     if(d.done){
       clearInterval(t);document.getElementById('touch').style.display='none';
       refresh();
-      if(keypanel.style.display!=='none') refreshKeys();
+      if(activeTab==='keys') refreshKeys();
     }
   },800);
 }

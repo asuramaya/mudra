@@ -16,34 +16,39 @@ Once installed (`make install`, which includes `install-service`), `mudra serve`
 systemd `--user` unit and starts with your graphical session — `systemctl --user status
 mudra` / `restart mudra` / `journalctl --user -u mudra` are the usual levers.
 
-Every repo renders as a card: version, tag state, anchor state (armed / inert / none),
-embedded-copy drift, working-tree dirt, and the derived verdict. Arm and seal are separate
-acts with separate buttons, on purpose — arming needs only the public keys and has to work
-on a repo that has never been tagged; sealing needs the physical touch and a published
-release, so it can only ever follow a tag, never precede one. An **ARM** button appears on
-any repo that isn't armed yet, tag or no tag. Clicking it previews which keys are about to be
-written, then demands an extra confirmation — arming pins the master identity fail-closed
-*forever*, so it asks once, deliberately, rather than being a checkbox you can miss. A
-**SEAL** button appears once a repo is both armed and has a release **AWAITING SEAL**. The
-ceremony streams its steps into a live log; when sealing needs your hardware key, the desk
-says so plainly. After upload, mudra re-downloads everything and verifies hash chain +
-signature exactly as an end user would — a card only ever reads "sealed" once that's been
-*proven*, not just uploaded.
+The desk is three tabs — **sign**, **keys**, **setup** — one visible at a time, so they
+never fight each other for space the way stacking toggle-panels used to.
 
-The key-picker dropdown lives in the header, not on each card — one physical key is plugged
-in at a time and it's good for whichever repo gets sealed next, so there's one picker for the
-whole desk. It remembers which physical key handle N pairs with, once you've sealed with it
-successfully — see `src/bin/mudra`'s device-fingerprint ladder in
-[ARCHITECTURE.md](ARCHITECTURE.md) if you're curious how.
+**sign** (the default tab) is the queue: every repo renders as a card — version, tag
+state, anchor state (armed / inert / none), embedded-copy drift, working-tree dirt, and
+the derived verdict. Arm and seal are separate acts with separate buttons, on purpose —
+arming needs only the public keys and has to work on a repo that has never been tagged;
+sealing needs the physical touch and a published release, so it can only ever follow a
+tag, never precede one. An **ARM** button appears on any repo that isn't armed yet, tag
+or no tag. Clicking it previews which keys are about to be written, then demands an
+extra confirmation — arming pins the master identity fail-closed *forever*, so it asks
+once, deliberately, rather than being a checkbox you can miss. A **SEAL** button appears
+once a repo is both armed and has a release **AWAITING SEAL**. The ceremony streams its
+steps into a live log; when sealing needs your hardware key, the desk says so plainly.
+After upload, mudra re-downloads everything and verifies hash chain + signature exactly
+as an end user would — a card only ever reads "sealed" once that's been *proven*, not
+just uploaded.
 
-**setup**, in the header, opens the same configuration `mudra init` writes — repo root,
-roster, key home, key prefix, expected key count, namespace tag — editable from the
-browser and saved back to `~/.config/mudra/config.json`. Roster/key settings load once
-at process start, so a save here needs a `mudra serve` restart to take effect, same as
-editing the config file by hand.
+The key-picker dropdown lives in the header, above the tabs — not on each card, and not
+inside any one tab — one physical key is plugged in at a time and it's good for
+whichever repo gets sealed next regardless of which tab you're looking at. It remembers
+which physical key handle N pairs with, once you've sealed with it successfully — see
+`src/bin/mudra`'s device-fingerprint ladder in [ARCHITECTURE.md](ARCHITECTURE.md) if
+you're curious how.
 
-**manage keys**, next to it, opens the wizard for your canonical handles themselves —
-the desk's rarest, highest-stakes act, one notch above sealing. Each configured slot
+**setup** opens the same configuration `mudra init` writes — repo root, roster, key
+home, key prefix, expected key count, namespace tag — editable from the browser and
+saved back to `~/.config/mudra/config.json`. Roster/key settings load once at process
+start, so a save here needs a `mudra serve` restart to take effect, same as editing the
+config file by hand.
+
+**keys** opens the wizard for your canonical handles themselves — the desk's rarest,
+highest-stakes act, one notch above sealing. Each configured slot
 shows empty or a fingerprint, a **plugged in now** chip when it's the one
 actually detected (read-only status — one physical key is ever connected at a time,
 there's nothing to pick), and a **GENERATE**/**REGENERATE** button that mints a

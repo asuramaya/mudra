@@ -77,6 +77,14 @@ pills-tag`, `root_layout_repos: [rotten-apple]`, the real 8-repo roster) as the 
 thing done here, verified byte-for-byte against `mudra status`/`audit` before touching
 anything else — the desk never went dark mid-refactor.
 
+The GUI's three self-serve surfaces — the queue, key setup, and configuration — became three
+tabs (**sign** / **keys** / **setup**), one visible at a time. The prior version shipped
+**setup** and **manage keys** as independent toggle buttons, each opening an inline panel
+that stacked alongside the *always-visible* repo queue — open both and three sections
+fought for the same page. The key-picker dropdown stays in the header, above the tabs,
+since it's relevant regardless of which tab is active; switching tabs starts/stops the
+keys tab's 2s live-polling the same way opening/closing the old panel used to.
+
 ## 0.8.1 — sutra was never mudra's to arm (2026-08-02)
 
 Removed sutra from `DEFAULT_REPOS`. RELEASE.md:201, the family's own ratified doctrine,
