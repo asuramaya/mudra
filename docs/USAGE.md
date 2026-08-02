@@ -36,16 +36,17 @@ successfully — see `src/bin/mudra`'s device-fingerprint ladder in
 
 **manage keys**, next to the picker, opens the wizard for the 4 canonical handles
 themselves — the desk's rarest, highest-stakes act, one notch above sealing. Each of the
-4 slots shows empty or a fingerprint, and two buttons: **this is the plugged-in key**
-just writes the mapping for whatever's connected right now (no generation, no touch —
-the manual version of what a successful seal learns on its own), and
-**GENERATE**/**REGENERATE** mints a brand-new hardware-backed key straight into that
-slot (PIN dialog, then TOUCH). `-O resident` keeps mudra's own rule intact even here:
-the private half never leaves the token, only its public half and a local handle stub
-(useless without the physical key present) ever touch disk. Regenerating an OCCUPIED
-slot asks a distinctly scarier confirmation than an empty one — it permanently retires
-whatever device was registered there, and every anchor already armed with its old
-public half needs re-arming, family-wide.
+4 slots shows empty or a fingerprint, a **plugged in now** chip when it's the one
+actually detected (read-only status — one physical key is ever connected at a time,
+there's nothing to pick), and a **GENERATE**/**REGENERATE** button that mints a
+brand-new hardware-backed key straight into that slot (PIN dialog, then TOUCH).
+`-O resident` keeps mudra's own rule intact even here: the private half never leaves
+the token, only its public half and a local handle stub (useless without the physical
+key present) ever touch disk. Regenerating an OCCUPIED slot asks a distinctly scarier
+confirmation than an empty one — it permanently retires whatever device was registered
+there, and every anchor already armed with its old public half needs re-arming,
+family-wide. Manual mapping — writing the "handle N" assignment for whatever's plugged
+in right now, no generation, no touch — is CLI-only: `keysetup --map N`.
 
 ## The CLI (same verbs, no browser)
 

@@ -736,8 +736,7 @@ button.ghost:disabled { border-color:#3a3a3a; }
 #keypanel .fp { color:var(--dim); font-size:.8em; font-family:monospace; }
 .card.keyslot { display:block; }
 .keyslot-head { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; }
-.keyslot .fp { display:block; margin:.6rem 0; }
-.keyslot button.ghost { display:block; }
+.keyslot .fp { display:block; margin:.6rem 0 0; }
 select { background:#333; color:var(--fg); border:1px solid #555;
          border-radius:999px; padding:.15em .5em; font-size:.9em; }
 select.det { background:color-mix(in srgb,var(--good) 25%,transparent);
@@ -802,13 +801,11 @@ async function refreshKeys(){
          st.key_home_exists?'dimc':'warn')+
     `<span class="fp">${st.key_home}</span></div>`;
   for(const s of st.slots){
-    // Only one physical key is ever plugged in at a time, so "this is the
-    // plugged-in key" is only a MEANINGFUL click on a slot that isn't
-    // already its home — showing it everywhere made every slot look
-    // equally "the" plugged-in one. It stays on the other slots as the
-    // correction path for a wrong mapping.
+    // "plugged in now" is read-only status — the GUI doesn't offer a manual
+    // map action per slot; showing it on every OTHER slot as a correction
+    // path was more confusing than useful (looked like a live choice on all
+    // 4, not a rare fix-up). `keysetup --map N` still exists on the CLI.
     const pluggedIn=st.detected_fp && st.mapped_slot===s.slot;
-    const canMap=st.detected_fp && st.mapped_slot!==s.slot;
     html+=`<div class="card keyslot"><div class="keyslot-head">`;
     html+=`<b>slot ${s.slot}</b>`;
     html+=s.present?chip(s.comment||'set','ok'):chip('empty','dimc');
@@ -817,19 +814,9 @@ async function refreshKeys(){
           (s.present?'REGENERATE':'GENERATE')+`</button>`;
     html+=`</div>`;
     if(s.fingerprint) html+=`<span class="fp">${trimFp(s.fingerprint)}</span>`;
-    if(canMap) html+=`<button data-act="map" data-slot="${s.slot}" class="ghost">`+
-                     `this is the plugged-in key</button>`;
     html+=`</div>`;
   }
   keypanel.innerHTML=html;
-  keypanel.querySelectorAll('button[data-act="map"]').forEach(b=>b.onclick=async()=>{
-    b.disabled=true;
-    const r=await fetch('/api/keysetup/map',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({slot:parseInt(b.dataset.slot)})});
-    const d=await r.json();
-    if(d.error) alert(d.error);
-    await refreshKeys();
-  });
   keypanel.querySelectorAll('button[data-act="gen"]').forEach(b=>b.onclick=async()=>{
     const slot=parseInt(b.dataset.slot);
     const info=st.slots.find(x=>x.slot===slot);

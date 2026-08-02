@@ -56,15 +56,16 @@ everything and verifies hash chain + signature exactly as an end user would — 
 means *proven* sealed.
 
 **manage keys**, in the header, is the wizard for the 4 canonical handles themselves —
-lower stakes than sealing, higher stakes than everything else on the desk. Two acts, per
-slot: **this is the plugged-in key** just registers the currently-detected device as
-handle N (no generation, no touch — the same mapping a successful seal learns on its
-own, without waiting for one), and **GENERATE**/**REGENERATE** mints a brand-new
-hardware-backed key straight onto an empty slot (PIN, then TOUCH). mudra still never
-holds key material here either: `-O resident` means the private half exists only on the
-token, never on disk. Regenerating an OCCUPIED slot is a distinct, scarier confirmation —
-it permanently retires whatever was there, and every anchor already armed with its
-public half needs re-arming family-wide.
+lower stakes than sealing, higher stakes than everything else on the desk. Each slot
+shows empty or a fingerprint, a **plugged in now** chip when it's the one actually
+detected (read-only — one physical key is ever connected at a time), and a
+**GENERATE**/**REGENERATE** button that mints a brand-new hardware-backed key straight
+onto that slot (PIN, then TOUCH). mudra still never holds key material here either:
+`-O resident` means the private half exists only on the token, never on disk.
+Regenerating an OCCUPIED slot is a distinct, scarier confirmation — it permanently
+retires whatever was there, and every anchor already armed with its public half needs
+re-arming family-wide. Manual mapping (registering the plugged-in device as handle N
+without generating anything) is CLI-only — `keysetup --map N`.
 
 ## The CLI (same verbs, no browser)
 

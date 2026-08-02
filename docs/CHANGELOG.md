@@ -3,22 +3,25 @@
 ## 0.8.0 — the key setup wizard (2026-08-02)
 
 The desk's rarest, highest-stakes act finally has a facilitator: `keysetup`, a wizard for
-the 4 canonical handles themselves, one notch above sealing. Two acts, per slot:
-**this is the plugged-in key** just registers whichever device is connected right now as
-handle N — no generation, no touch, the manual version of the mapping a successful seal
-already learns on its own — and **GENERATE**/**REGENERATE** mints a brand-new
-hardware-backed key straight onto a slot via `ssh-keygen -t ed25519-sk -O resident` (PIN
-dialog, then TOUCH). mudra's own rule holds even here: `-O resident` keeps the private
-half on the token, non-extractable; only the public half and a local handle stub (useless
-without the physical key present) ever touch disk. Regenerating an OCCUPIED slot asks a
-distinctly scarier question than an empty one — it permanently retires whatever device was
-registered there, and every anchor already armed with its old public half needs re-arming,
-family-wide, so it refuses outright without an explicit `force` (CLI) or extra confirmation
-(GUI). Reachable from the CLI (`keysetup`, `keysetup --slot N [--force]`,
-`keysetup --map N`) and from the desk's header (**manage keys**, next to the key picker).
-Ceremony.keysetup shares the same single-flight lock as arm and seal — it's the third act
-writing into shared state (the key home this time, not a repo), not a fourth exception to
-the rule.
+the 4 canonical handles themselves, one notch above sealing. Each slot's card shows empty
+or a fingerprint, a **plugged in now** chip when it's the one actually detected (read-only
+status — one physical key is ever connected at a time, so there's nothing to choose), and a
+**GENERATE**/**REGENERATE** button that mints a brand-new hardware-backed key straight onto
+that slot via `ssh-keygen -t ed25519-sk -O resident` (PIN dialog, then TOUCH). mudra's own
+rule holds even here: `-O resident` keeps the private half on the token, non-extractable;
+only the public half and a local handle stub (useless without the physical key present)
+ever touch disk. Regenerating an OCCUPIED slot asks a distinctly scarier question than an
+empty one — it permanently retires whatever device was registered there, and every anchor
+already armed with its old public half needs re-arming, family-wide — so it refuses outright
+without an explicit `force` (CLI) or extra confirmation (GUI). The manual mapping half
+(`keysetup --map N`: register whichever device is connected right now as handle N, no
+generation, no touch — the same mapping a successful seal already learns on its own) stays
+CLI-only; a per-slot GUI button for it turned out to read as a live choice on all 4 slots at
+once rather than the rare fix-up it actually is. Reachable from the CLI (`keysetup`,
+`keysetup --slot N [--force]`, `keysetup --map N`) and from the desk's header (**manage
+keys**, next to the key picker, for status + generation). Ceremony.keysetup shares the same
+single-flight lock as arm and seal — it's the third act writing into shared state (the key
+home this time, not a repo), not a fourth exception to the rule.
 
 Also in this release: `MUDRA_KEYMAP_PATH` joins the rest of mudra's env overrides
 (`MUDRA_KEY_HOME`, `MUDRA_REPO_ROOT`, ...) — found necessary while writing this feature's
@@ -33,15 +36,6 @@ Fixed before this ever ran for real: `keysetup`'s generation used a single share
 each carry their own per-slot RP ID (`ssh:asuramaya-master-N`, visible in a hardware key's
 own credential manager, not just mudra's view of it) — caught by comparing the two before
 `keysetup` was ever used to mint anything. Now matches: `application=ssh:asuramaya-master-{slot}`.
-
-The wizard panel's first cut also had a UX bug: since only one physical key is ever plugged
-in at a time, **this is the plugged-in key** showing as an equally live action on all 4 slots
-made every slot look like it might be the connected one. Reorganized: each slot card now
-leads with a header row (slot, comment or "empty", a **plugged in now** chip when it's the
-one actually detected, REGENERATE flush right), the fingerprint gets its own trimmed line
-(no more repeating the comment that's already a chip), and the map button only appears on
-slots where clicking it would actually change something — gone from the one slot that's
-already home, present as the correction path on the other three.
 
 ## 0.1.0 — the seal desk opens (2026-07-19)
 
