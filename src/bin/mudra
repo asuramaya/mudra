@@ -47,28 +47,6 @@ def load_config():
         return {}
 
 
-_config = load_config()
-REPO_ROOT = os.environ.get(
-    "MUDRA_REPO_ROOT",
-    os.path.expanduser(_config.get("repo_root", os.path.join(HOME, "code", "REPOS"))))
-KEY_HOME = os.environ.get(
-    "MUDRA_KEY_HOME",
-    os.path.expanduser(_config.get("key_home", os.path.join(HOME, ".ssh", "mudra-master"))))
-KEY_PREFIX = os.environ.get("MUDRA_KEY_PREFIX", _config.get("key_prefix", "master"))
-EXPECTED_KEYS = int(os.environ.get("MUDRA_EXPECTED_KEYS", _config.get("expected_keys", 4)))
-NAMESPACE_TAG = os.environ.get("MUDRA_NAMESPACE_TAG", _config.get("namespace_tag", ""))
-# Repos NOT on the packaging/ layout (no packaging/VERSION; anchor sits at
-# the pre-convergence root release-signing/ instead) — rare, NAMED per-repo
-# exceptions, never a generic root-or-packaging probe for everyone (a probe
-# that assumed either layout for every repo once let a real armed anchor go
-# invisible — see docs/ARCHITECTURE.md). Empty by default; add your own
-# repo's name here only if it genuinely isn't shaped like a packaging/-layout
-# repo, never as a blanket "maybe" for the whole roster.
-_root_layout_env = os.environ.get("MUDRA_ROOT_LAYOUT_REPOS")
-if _root_layout_env is not None:
-    ROOT_LAYOUT_REPOS = {r for r in _root_layout_env.split(",") if r}
-else:
-    ROOT_LAYOUT_REPOS = set(_config.get("root_layout_repos", []))
 # mudra CAN track itself too, if you add "mudra" to your own roster — it's
 # not exempt from the doctrine it enforces on anything else you track.
 # self_path resolves to wherever THIS script's repo actually lives (not
@@ -76,7 +54,8 @@ else:
 # e.g. by tests/smoke.sh's fixture roots), overriding the plain-name lookup.
 # Three levels up from src/bin/mudra (REPO-STANDARD.md's tree fold, 2026-08-01)
 # — two would land on src/ itself, silently pointing every self-lookup
-# (VERSION, the anchor, packaging/VERSION) at the wrong directory.
+# (VERSION, the anchor, packaging/VERSION) at the wrong directory. Fixed for
+# the process lifetime (moving the script itself means restarting anyway).
 _self_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # One version constant (REPO-STANDARD.md): read from packaging/VERSION at
 # import time rather than hand-duplicated here, so the footer can never drift
@@ -85,24 +64,101 @@ _self_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 # check-repo's literal-version-string check exists to catch.
 with open(os.path.join(_self_path, "packaging", "VERSION")) as _f:
     MUDRA_VERSION = _f.read().strip()
-# Roster entries are names under REPO_ROOT, or paths (anything with a "/").
-# ROSTER maps display name -> absolute path; order is the desk's card order.
-# Empty by default — this is YOUR roster, not a shipped list of someone
-# else's projects. `mudra init` walks you through building it; MUDRA_REPOS
-# (comma-separated) overrides the config file for a one-off run.
-_repos_env = os.environ.get("MUDRA_REPOS")
-_repo_entries = ([r for r in _repos_env.split(",") if r] if _repos_env is not None
-                 else list(_config.get("repos", [])))
+
+_config = {}
+REPO_ROOT = KEY_HOME = KEY_PREFIX = SIGN_KEY = None
+EXPECTED_KEYS = 4
+NAMESPACE_TAG = ""
+ROOT_LAYOUT_REPOS = set()
 ROSTER = {}
-for _e in _repo_entries:
-    if _e == "mudra":
-        _p = _self_path
+REPOS = []
+_config_mtime = None
+
+
+def _derive_config():
+    """(Re)compute _config and everything derived from it — REPO_ROOT,
+    KEY_HOME, KEY_PREFIX, EXPECTED_KEYS, NAMESPACE_TAG, ROOT_LAYOUT_REPOS,
+    ROSTER, REPOS, SIGN_KEY — honoring MUDRA_* env precedence exactly as
+    always (env still wins over file). Called once at import, and again
+    whenever CONFIG_PATH's mtime moves (reload_config_if_stale, below).
+
+    Before this function existed, all of the above were derived ONCE at
+    IMPORT TIME and then frozen for the process lifetime — write_config()
+    persisted a new config.json but touched none of them, so mudra's own
+    setup tab could save a new roster, report success, and keep serving
+    the old one until the process happened to die. An operator's own
+    hand-edit to config.json hit the identical freeze; only a restart of
+    the mudra.service unit corrected it. That is ruling 41b72476 word for
+    word — "a layer-3 verb succeeds when the pill's OWN OBSERVATION
+    changes, never when its file is written" — broken inside the repo
+    that enforces it on the other six (Alfred msg 3439)."""
+    global _config, REPO_ROOT, KEY_HOME, KEY_PREFIX, EXPECTED_KEYS, \
+        NAMESPACE_TAG, ROOT_LAYOUT_REPOS, ROSTER, REPOS, SIGN_KEY, _config_mtime
+    _config = load_config()
+    REPO_ROOT = os.environ.get(
+        "MUDRA_REPO_ROOT",
+        os.path.expanduser(_config.get("repo_root", os.path.join(HOME, "code", "REPOS"))))
+    KEY_HOME = os.environ.get(
+        "MUDRA_KEY_HOME",
+        os.path.expanduser(_config.get("key_home", os.path.join(HOME, ".ssh", "mudra-master"))))
+    KEY_PREFIX = os.environ.get("MUDRA_KEY_PREFIX", _config.get("key_prefix", "master"))
+    EXPECTED_KEYS = int(os.environ.get("MUDRA_EXPECTED_KEYS", _config.get("expected_keys", 4)))
+    NAMESPACE_TAG = os.environ.get("MUDRA_NAMESPACE_TAG", _config.get("namespace_tag", ""))
+    # Repos NOT on the packaging/ layout (no packaging/VERSION; anchor sits at
+    # the pre-convergence root release-signing/ instead) — rare, NAMED
+    # per-repo exceptions, never a generic root-or-packaging probe for
+    # everyone (a probe that assumed either layout for every repo once let a
+    # real armed anchor go invisible — see docs/ARCHITECTURE.md). Empty by
+    # default; add your own repo's name here only if it genuinely isn't
+    # shaped like a packaging/-layout repo, never as a blanket "maybe" for
+    # the whole roster.
+    _root_layout_env = os.environ.get("MUDRA_ROOT_LAYOUT_REPOS")
+    if _root_layout_env is not None:
+        ROOT_LAYOUT_REPOS = {r for r in _root_layout_env.split(",") if r}
     else:
-        _p = os.path.expanduser(_e) if "/" in _e else os.path.join(REPO_ROOT, _e)
-    ROSTER[os.path.basename(_p.rstrip("/"))] = _p
-REPOS = list(ROSTER)
+        ROOT_LAYOUT_REPOS = set(_config.get("root_layout_repos", []))
+    # Roster entries are names under REPO_ROOT, or paths (anything with a
+    # "/"). ROSTER maps display name -> absolute path; order is the desk's
+    # card order. Empty by default — this is YOUR roster, not a shipped list
+    # of someone else's projects. `mudra init` walks you through building it;
+    # MUDRA_REPOS (comma-separated) overrides the config file for a one-off
+    # run.
+    _repos_env = os.environ.get("MUDRA_REPOS")
+    _repo_entries = ([r for r in _repos_env.split(",") if r] if _repos_env is not None
+                     else list(_config.get("repos", [])))
+    _roster = {}
+    for _e in _repo_entries:
+        if _e == "mudra":
+            _p = _self_path
+        else:
+            _p = os.path.expanduser(_e) if "/" in _e else os.path.join(REPO_ROOT, _e)
+        _roster[os.path.basename(_p.rstrip("/"))] = _p
+    ROSTER = _roster
+    REPOS = list(ROSTER)
+    SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, f"id_{KEY_PREFIX}_1"))
+    try:
+        _config_mtime = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        _config_mtime = None
+
+
+def reload_config_if_stale():
+    """Cheap per-request check (one stat(), not a hash or a full reparse):
+    has config.json moved since we last read it? Covers write_config()'s
+    own atomic save AND an external hand-edit — the path the operator
+    actually took (msg 3439), which a write_config()-only reload hook
+    would have missed entirely. Called at the top of every HTTP request
+    and CLI invocation."""
+    try:
+        mtime = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        mtime = None
+    if mtime != _config_mtime:
+        _derive_config()
+
+
+_derive_config()
 PORT = int(os.environ.get("MUDRA_PORT", "7770"))
-SIGN_KEY = os.environ.get("MUDRA_SIGN_KEY", os.path.join(KEY_HOME, f"id_{KEY_PREFIX}_1"))
 KEYMAP_PATH = os.environ.get("MUDRA_KEYMAP_PATH",
                              os.path.join(HOME, ".config", "mudra", "keymap.json"))
 POLKIT_ACTION = "com.mudra.open-desk"
@@ -467,6 +523,14 @@ def sync_signers(name, dry=False):
     if len(pubs) != EXPECTED_KEYS:
         raise SystemExit(f"refusing: {len(pubs)} canonical pubs, expected {EXPECTED_KEYS}")
     path = ROSTER.get(name, os.path.join(REPO_ROOT, name))
+    # Same floor as repo_state()'s own missing check (thread 6c3ec0b4):
+    # without this, a stale roster entry for a renamed-away repo would
+    # os.makedirs() + write a signer file into a path nothing tracks,
+    # resurrecting it as an empty skeleton. Every caller (CLI's bare
+    # `sync-signers`, the ceremony's arm, the GUI preview) gets this for
+    # free rather than needing its own missing-check first.
+    if not os.path.isdir(os.path.join(path, ".git")):
+        raise SystemExit(f"refusing: {name} missing from {path} (renamed, or never cloned)")
     principal = name.lower()
     namespaces = f"{principal}-release" + (f",{NAMESPACE_TAG}" if NAMESPACE_TAG else "")
     lines = []
@@ -1015,8 +1079,8 @@ async function refreshSetup(){
       body:JSON.stringify(body)});
     const d2=await r2.json();
     if(d2.error){ alert('Save failed: '+d2.error); return; }
-    alert('Saved to '+cfg.config_path+'. Roster/key settings load once at '+
-          'startup — restart mudra serve to pick this up.');
+    alert('Saved to '+cfg.config_path+'. Refreshing the roster now.');
+    refresh();
   };
 }
 async function refresh(){
@@ -1026,6 +1090,18 @@ async function refresh(){
   const el=document.getElementById('repos'); el.innerHTML='';
   for(const s of d.repos){
     const div=document.createElement('div');
+    if(s.missing){
+      // Render honestly rather than let three absent fields read as three
+      // flavors of nothing ('v?' / 'anchor undefined' / 'undefined') — a
+      // repo that moved must look like a repo that moved, not a bug in
+      // mudra. No ARM button: the ceremony's own repo_state() check
+      // already refuses on missing (safe), but offering a control that
+      // can only fail is its own kind of dishonest render.
+      div.className='card';
+      div.innerHTML=`<b>${s.name}</b>`+chip('MISSING: '+s.path,'bad');
+      el.appendChild(div);
+      continue;
+    }
     const armed=s.anchor==='armed';
     // Arm and seal are two separate acts now: arm works on ANY unarmed
     // repo regardless of tag state (that is the whole point — the old
@@ -1164,6 +1240,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return any(c.strip() == f"mudra={TOKEN}" for c in cookies.split(";"))
 
     def do_GET(self):
+        reload_config_if_stale()
         if not self._authed():
             return self._send('{"error":"unauthorized — open the URL the serve '
                               'command printed"}', code=401)
@@ -1207,6 +1284,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send('{"error":"not found"}', code=404)
 
     def do_POST(self):
+        reload_config_if_stale()
         if not self._authed():
             return self._send('{"error":"unauthorized"}', code=401)
         path = urllib.parse.urlparse(self.path).path
@@ -1232,6 +1310,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "expected_keys": expected_keys,
                     "namespace_tag": str(req.get("namespace_tag", "")),
                 })
+                # Unconditional, not just reload_config_if_stale(): this
+                # save's own new mtime should win the observation within
+                # THIS request, not wait for the next poll's stat() to
+                # notice (mtime resolution is whole seconds on some
+                # filesystems — a write-then-immediate-read inside the
+                # same second must still see the new roster).
+                _derive_config()
                 return self._send('{"ok":true}')
             if path == "/api/keysetup/map":
                 slot = req.get("slot")
@@ -1339,6 +1424,9 @@ def cli_status(args):
         print(json.dumps({"repos": states}, indent=2))
         return
     for s in states:
+        if s.get("missing"):
+            print(f"{s['name']:<10} MISSING: {s['path']}")
+            continue
         ver = s.get("version") or "?"
         print(f"{s['name']:<10} v{ver:<8} anchor={s.get('anchor','?'):<5} "
               f"{'dirty ' if s.get('dirty') else ''}{s.get('state','')}")
@@ -1350,6 +1438,9 @@ def cli_audit(args):
                          "your roster (or set MUDRA_REPOS for a one-off run)")
     states, findings = audit(no_remote="--remote" not in args)
     for s in states:
+        if s.get("missing"):
+            print(f"{s['name']:<10} MISSING: {s['path']}")
+            continue
         ver = s.get("version") or "?"
         print(f"{s['name']:<10} v{ver:<8} anchor={s.get('anchor','?')}")
     if findings:
@@ -1414,6 +1505,7 @@ def cli_open(args):
 
 
 def main():
+    reload_config_if_stale()
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
         print(__doc__ or "mudra init|status|audit|sync-signers <repo> [--dry]|"

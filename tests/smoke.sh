@@ -326,4 +326,66 @@ else
     || die "keysetup --map failed for the wrong reason: $out"
 fi
 
+# LIVE CONFIG RELOAD (msg 3439): a restart-based test proves nothing here —
+# the bug was specifically that a LONG-RUNNING `mudra serve` process froze
+# REPO_ROOT/KEY_HOME/ROSTER/etc at import time and never re-read config.json,
+# so an operator's own hand-edit (or the setup tab's own write_config())
+# landed on disk but kept serving the old roster until the unit died. This
+# starts a real `mudra serve`, edits config.json UNDER THE LIVE PROCESS with
+# a plain overwrite (not mudra's own write_config() -- proving the fix
+# covers an EXTERNAL edit, the path the operator actually took, not just
+# mudra's own save path), and asserts /api/status's own observation changed.
+# A fresh HOME keeps write_session()'s session.json (no MUDRA_* override
+# exists for it) away from anything else this file has touched.
+mkdir -p "$T/livehome/.config/mudra" "$T/repos/livecfg-a/packaging" "$T/repos/livecfg-b/packaging"
+for r in livecfg-a livecfg-b; do
+  ( cd "$T/repos/$r" && git init -q . && echo 0.0.1 > packaging/VERSION \
+    && git add -A && git -c user.email=s@s -c user.name=s commit -qm x )
+done
+LIVECFG="$T/livehome/.config/mudra/config.json"
+printf '{"repos": ["livecfg-a"]}' > "$LIVECFG"
+LIVEPORT=27771
+env HOME="$T/livehome" MUDRA_CONFIG_PATH="$LIVECFG" MUDRA_REPO_ROOT="$T/repos" \
+    MUDRA_KEY_HOME="$T/keys" MUDRA_PORT="$LIVEPORT" "$MUDRA" serve \
+    >"$T/live-serve.log" 2>&1 &
+LIVE_PID=$!
+LIVE_TOKEN=""
+for _ in $(seq 1 50); do
+  if [ -f "$T/livehome/.config/mudra/session.json" ]; then
+    LIVE_TOKEN="$(python3 -c "import json;print(json.load(open('$T/livehome/.config/mudra/session.json'))['token'])" 2>/dev/null)"
+    [ -n "$LIVE_TOKEN" ] && break
+  fi
+  sleep 0.1
+done
+if [ -z "$LIVE_TOKEN" ]; then
+  die "live-reload: mudra serve never started: $(cat "$T/live-serve.log")"
+else
+  before="$(curl -s "http://127.0.0.1:$LIVEPORT/api/status?token=$LIVE_TOKEN" \
+    | python3 -c "import json,sys; print(','.join(sorted(r['name'] for r in json.load(sys.stdin)['repos'])))" 2>/dev/null)"
+  printf '{"repos": ["livecfg-b"]}' > "$LIVECFG"
+  after="$(curl -s "http://127.0.0.1:$LIVEPORT/api/status?token=$LIVE_TOKEN" \
+    | python3 -c "import json,sys; print(','.join(sorted(r['name'] for r in json.load(sys.stdin)['repos'])))" 2>/dev/null)"
+  if [ "$before" = "livecfg-a" ] && [ "$after" = "livecfg-b" ]; then
+    say "live-reload: a live serve process picks up an external config.json edit, no restart ok"
+  else
+    die "live-reload: process kept serving a stale roster after an external edit (before=$before after=$after)"
+  fi
+fi
+kill "$LIVE_PID" 2>/dev/null
+wait "$LIVE_PID" 2>/dev/null
+
+# NEGATIVE CONTROL for sync-signers' missing-repo guard: a roster entry with
+# no matching directory at all (a rename, or a name that never existed) must
+# refuse rather than os.makedirs() + write a signer file into a path nothing
+# tracks -- the "dangerous door" half of msg 3439 (thread 6c3ec0b4). Must
+# NOT create the directory.
+ENV6="MUDRA_REPO_ROOT=$T/repos MUDRA_REPOS=ghost-repo MUDRA_KEY_HOME=$T/keys MUDRA_CONFIG_PATH=$T/no-config.json"
+out="$(env $ENV6 "$MUDRA" sync-signers ghost-repo 2>&1)"
+rc=$?
+if [ "$rc" != 0 ] && echo "$out" | grep -qi "missing" && [ ! -e "$T/repos/ghost-repo" ]; then
+  say "sync-signers: refuses a missing repo instead of resurrecting a skeleton dir ok"
+else
+  die "sync-signers: missing-repo guard didn't fire (rc=$rc, dir exists=$([ -e "$T/repos/ghost-repo" ] && echo yes || echo no)): $out"
+fi
+
 [ "$FAIL" = 0 ] && echo "SMOKE OK" || { echo "SMOKE FAILED"; exit 1; }

@@ -41,6 +41,19 @@ nothing to keep in sync because it never stores what it can re-derive:
   every pill's `sync_signers` reads from it. `keysetup` is the one place mudra **writes** there
   (minting a fresh handle's public half + local stub, see below); it is not one of the two
   self-owned convenience files above, and unlike them it is never safe to just delete.
+- **`config.json`-derived state (`REPO_ROOT`, `KEY_HOME`, `ROSTER`, ...) is cached, not
+  re-derived on every call** — the one deliberate exception to "nothing is cached across runs,"
+  because deriving it touches env vars, `os.path.expanduser`, and a JSON parse on every single
+  request, which is real cost `status`/`audit`'s own git-and-filesystem reads don't have. The
+  cache is invalidated by an mtime check (`reload_config_if_stale()`, called at the top of every
+  HTTP request and CLI invocation) rather than left to freeze for the process lifetime — a
+  `mudra serve` that outlives a config.json edit (its own `write_config()`, or an operator's
+  hand-edit) must observe the new roster on the very next request, not the next restart. This
+  was NOT true before 2026-08-03 — ruling 41b72476 violated inside the repo that enforces it on
+  the other six pills, found from a dead desk card after a hand-edited roster kept serving stale
+  — and `tests/smoke.sh`'s live-reload check exists specifically to keep it from regressing
+  silently: a restart-based test cannot catch this class of bug, only a live process with
+  config.json edited underneath it can.
 
 ## The three roles that never overlap
 

@@ -43,9 +43,9 @@ you're curious how.
 
 **setup** opens the same configuration `mudra init` writes — repo root, roster, key
 home, key prefix, expected key count, namespace tag — editable from the browser and
-saved back to `~/.config/mudra/config.json`. Roster/key settings load once at process
-start, so a save here needs a `mudra serve` restart to take effect, same as editing the
-config file by hand.
+saved back to `~/.config/mudra/config.json`. A running `mudra serve` picks up the
+change immediately, no restart needed — that goes for a hand-edit of the config file
+too, watched by mtime on every request, not just a save from this tab.
 
 **keys** opens the wizard for your canonical handles themselves — the desk's rarest,
 highest-stakes act, one notch above sealing. Each configured slot
