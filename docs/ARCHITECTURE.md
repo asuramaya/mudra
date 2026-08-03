@@ -118,7 +118,7 @@ a wrinkle exists, not a reassurance that one doesn't.
 
 `DEFAULT_REPOS` tracks **eight** repos. REPO-STANDARD.md's `packaging/` convergence effort
 covers **seven** of them (the five pills + gestalt + mudra) — that was the full set alfred's
-own coordination charter spans for packaging-layout purposes (byebyte, RAMstein, coldspot,
+own coordination charter spans for packaging-layout purposes (byebyte, ramstein, coldspot,
 gestalt, kast, mudra, phanspeed, and sutra too, on the same layout for file-structure
 consistency), and every measurement of "is the family converged" naturally inherited that
 boundary without anyone writing down that it existed. **rotten-apple is the eighth, and it was
