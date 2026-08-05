@@ -121,7 +121,7 @@ env $ENV "$MUDRA" audit >/dev/null 2>&1 \
 
 # sync-signers: rebuild-from-all — 4 lines, principal + namespace, embedded twin synced
 env $ENV "$MUDRA" sync-signers fakepill >/dev/null || die "sync-signers rc"
-n="$(grep -c '^fakepill namespaces="fakepill-release,pills-tag" ' \
+n="$(grep -c '^fakepill namespaces="fakepill-release,pills-tag,git" ' \
      "$T/repos/fakepill/packaging/release-signing/allowed_signers")"
 [ "$n" = 4 ] && say "sync-signers: 4 canonical lines ok" || die "anchor lines: $n"
 grep -q 'fakepill-release' "$T/repos/fakepill/install.sh" \
@@ -157,13 +157,15 @@ else
   die "fresh anchor landed at the wrong path"
 fi
 
-# namespace has no forced second tag when MUDRA_NAMESPACE_TAG isn't
+# namespace has no forced release-tag when MUDRA_NAMESPACE_TAG isn't
 # configured (ENV2 doesn't set it) — the old hardcoded ",pills-tag" is gone,
-# a stranger's anchor shouldn't carry a family tag they never asked for
-grep -q 'fakepackaged namespaces="fakepackaged-release" ' \
+# a stranger's anchor shouldn't carry a family tag they never asked for.
+# "git" is the one namespace segment that's always present regardless —
+# it's git's own SSH-signing namespace, not a family convention.
+grep -q 'fakepackaged namespaces="fakepackaged-release,git" ' \
      "$T/repos/fakepackaged/packaging/release-signing/allowed_signers" \
-  && say "sync-signers: namespace carries no unconfigured tag ok" \
-  || die "namespace included a tag that was never configured"
+  && say "sync-signers: namespace carries no unconfigured tag (but always git) ok" \
+  || die "namespace included a tag that was never configured, or is missing git"
 
 # ARM CEREMONY (`mudra arm <repo>`, the standalone act split out from seal):
 # writes the anchor, then a SCOPED commit, then push — needs a real git

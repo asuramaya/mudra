@@ -532,7 +532,11 @@ def sync_signers(name, dry=False):
     if not os.path.isdir(os.path.join(path, ".git")):
         raise SystemExit(f"refusing: {name} missing from {path} (renamed, or never cloned)")
     principal = name.lower()
-    namespaces = f"{principal}-release" + (f",{NAMESPACE_TAG}" if NAMESPACE_TAG else "")
+    # "git" is git's own SSH-signing namespace (verified against git 2.53.0,
+    # not assumed) -- distinct from the release-artifact namespace above it.
+    # Emitted for every repo so `git tag -s`/`git verify-tag` work against
+    # this same anchor; a repo's release-artifact namespace is unaffected.
+    namespaces = f"{principal}-release" + (f",{NAMESPACE_TAG}" if NAMESPACE_TAG else "") + ",git"
     lines = []
     for p in pubs:
         parts = p.split()
